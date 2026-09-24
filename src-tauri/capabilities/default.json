@@ -1,0 +1,11 @@
+{
+  "identifier": "default",
+  "description": "Default capabilities for DshDeck main window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:allow-open",
+    "shell:allow-execute",
+    "shell:allow-spawn"
+  ]
+}

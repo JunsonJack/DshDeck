@@ -1,0 +1,20 @@
+{
+  "name": "dshdeck",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Thin desktop workbench for DeepSeek Harness (dsh) via ACP",
+  "type": "module",
+  "scripts": {
+    "probe": "node probe/acp-probe.mjs",
+    "dev:host": "node apps/dshdeck-host/server.mjs",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "start": "node apps/dshdeck-host/server.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}
