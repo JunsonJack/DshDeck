@@ -11,6 +11,7 @@ use tokio::sync::Mutex as AsyncMutex;
 struct AppState {
     acp: AsyncMutex<AcpState>,
     cwd: Mutex<String>,
+    unclean_last_exit: Mutex<bool>,
 }
 
 fn emit(app: &tauri::AppHandle, event: &str, payload: serde_json::Value) {
@@ -102,6 +103,16 @@ async fn session_close(state: State<'_, AppState>) -> Result<serde_json::Value, 
 }
 
 #[tauri::command]
+async fn session_set_config(
+    state: State<'_, AppState>,
+    config_id: String,
+    value: String,
+) -> Result<serde_json::Value, String> {
+    let conn = state.acp.lock().await.conn().ok_or("not booted")?;
+    conn.session_set_config(&config_id, &value).await
+}
+
+#[tauri::command]
 async fn permission_response(
     state: State<'_, AppState>,
     id: i64,
@@ -135,11 +146,13 @@ async fn git_status(state: State<'_, AppState>) -> Result<serde_json::Value, Str
 }
 
 #[tauri::command]
-fn health() -> serde_json::Value {
+fn health(state: State<'_, AppState>) -> serde_json::Value {
     let dsh = which::which("dsh").ok().map(|p| p.display().to_string());
+    let unclean = state.unclean_last_exit.lock().map(|g| *g).unwrap_or(false);
     serde_json::json!({
         "dsh": dsh,
         "ok": dsh.is_some(),
+        "uncleanLastExit": unclean,
     })
 }
 
@@ -173,6 +186,34 @@ fn chrono_lite_now() -> String {
     format!("{now}")
 }
 
+/// StartupRecovery markers, in DshDeck's own data dir (never ~/.dsh):
+/// - `installed` sentinel: written on first start, distinguishes first run from unclean exit
+/// - `last-clean-exit`: rewritten on every orderly shutdown; absence ⇒ unclean
+fn marker_path(name: &str) -> Option<std::path::PathBuf> {
+    std::env::var_os("LOCALAPPDATA").map(|b| {
+        let dir = std::path::PathBuf::from(b).join("DshDeck");
+        let _ = std::fs::create_dir_all(&dir);
+        dir.join(name)
+    })
+}
+
+fn last_exit_was_unclean() -> bool {
+    let (Some(installed), Some(clean)) = (marker_path("installed"), marker_path("last-clean-exit")) else {
+        return false;
+    };
+    if !installed.exists() {
+        let _ = std::fs::write(&installed, chrono_lite_now());
+        return false; // first run
+    }
+    !clean.exists()
+}
+
+fn write_clean_exit_marker() {
+    if let Some(p) = marker_path("last-clean-exit") {
+        let _ = std::fs::write(p, chrono_lite_now());
+    }
+}
+
 fn main() {
     if std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").is_none() {
         if let Some(base) = std::env::var_os("LOCALAPPDATA") {
@@ -185,12 +226,17 @@ fn main() {
 
     log_line("starting DshDeck");
     log_line(&format!("cwd={}", std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_default()));
+    let unclean = last_exit_was_unclean();
+    if unclean {
+        log_line("startup recovery: previous exit was unclean");
+    }
 
     let result = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(AppState {
             acp: AsyncMutex::new(AcpState::new()),
             cwd: Mutex::new(String::new()),
+            unclean_last_exit: Mutex::new(unclean),
         })
         .setup(|app| {
             use tauri::WebviewWindowBuilder;
@@ -219,16 +265,26 @@ fn main() {
             session_prompt,
             session_cancel,
             session_close,
+            session_set_config,
             permission_response,
             git_diff,
             git_status,
             health,
         ])
-        .run(tauri::generate_context!());
+        .build(tauri::generate_context!());
 
-    if let Err(e) = result {
-        log_line(&format!("RUN ERROR: {e}"));
-        eprintln!("DshDeck failed to start: {e}");
-        std::process::exit(1);
+    match result {
+        Ok(app) => {
+            app.run(|_app, event| {
+                if matches!(event, tauri::RunEvent::Exit) {
+                    write_clean_exit_marker();
+                }
+            });
+        }
+        Err(e) => {
+            log_line(&format!("RUN ERROR: {e}"));
+            eprintln!("DshDeck failed to start: {e}");
+            std::process::exit(1);
+        }
     }
 }

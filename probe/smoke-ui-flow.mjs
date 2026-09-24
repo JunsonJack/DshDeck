@@ -58,7 +58,32 @@ ws.on("open", async () => {
     const diff = await waitOnce("git/diff", 15000);
     check("git/diff ok", diff.payload?.ok === true && diff.payload?.git === true);
 
-    // 5. permission/response for unknown id → graceful error, no crash
+    // 5. set_config roundtrip (reasoning_effort → low → back to high)
+    send("session/set_config", { configId: "reasoning_effort", value: "low" });
+    const cfg = await waitOnce("config/options", 15000);
+    const eff = (cfg.payload?.configOptions || []).find((o) => o.id === "reasoning_effort");
+    check("set_config applies", eff?.currentValue === "low", `effort=${eff?.currentValue}`);
+
+    // 6. cancel-as-notification settles an in-flight prompt with stopReason "cancelled"
+    send("session/prompt", { text: "用中文写一篇约1000字的关于分布式系统的短文。" });
+    await new Promise((r) => setTimeout(r, 2500));
+    send("session/cancel", {});
+    const cancelled = await waitOnce("prompt/stop", 30000);
+    check("cancel settles prompt", cancelled.payload?.stopReason === "cancelled", `stop=${cancelled.payload?.stopReason}`);
+
+    // 7. session usable after cancel
+    send("session/prompt", { text: "Say only: PONG" });
+    const after = await waitOnce("prompt/stop", 60000);
+    check("post-cancel prompt", after.payload?.stopReason === "end_turn", `stop=${after.payload?.stopReason}`);
+
+    // 8. reconnect: shutdown → boot again works (lock released, bridge replaced)
+    send("shutdown", {});
+    await waitOnce("exit", 10000);
+    send("boot", { cwd: "E:\\VibeCodingProject\\DshDeck" });
+    const rebooted = await waitOnce("booted", 40000);
+    check("reconnect boot", !!rebooted.payload?.agent?.agentInfo);
+
+    // 9. permission/response for unknown id → graceful error, no crash
     send("permission/response", { id: 9999, allow: true });
     const err = await waitOnce("error", 10000);
     check("permission/response graceful", /pending permission/i.test(err.payload?.message || ""), err.payload?.message);

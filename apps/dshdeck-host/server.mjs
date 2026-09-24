@@ -5,6 +5,7 @@
  * Usage: node apps/dshdeck-host/server.mjs [--port 5177] [--cwd <workspace>]
  */
 import { createServer } from "node:http";
+import { createServer as netCreateServer, connect } from "node:net";
 import { readFile } from "node:fs/promises";
 import { extname, join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,6 +36,54 @@ const MIME = {
   ".ico": "image/x-icon",
 };
 
+/** DataRootLock — one live connection per profile, via a deterministic localhost port.
+ *  Binding succeeds → we hold the lock (listener kept alive). Binding fails →
+ *  probe the port: reachable means another instance holds it; unreachable means
+ *  conservative refusal (EPERM-style). Self-cleans on process death. */
+function profileLockPort(profile) {
+  let h = 0;
+  for (const c of String(profile)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return 47700 + (h % 256);
+}
+function acquireProfileLock(profile) {
+  const port = profileLockPort(profile);
+  return new Promise((res, rej) => {
+    const srv = netCreateServer();
+    srv.once("error", async () => {
+      const reachable = await new Promise((r) => {
+        const s = connect(port, "127.0.0.1");
+        s.once("connect", () => { s.destroy(); r(true); });
+        s.once("error", () => r(false));
+        setTimeout(() => { s.destroy(); r(false); }, 800);
+      });
+      rej(new Error(
+        reachable
+          ? `profile「${profile}」已有活动连接（另一个 DshDeck 窗口或宿主进程在运行），同 profile 不双开`
+          : `profile 锁端口 ${port} 不可用且无持有者，保守拒绝启动`
+      ));
+    });
+    srv.listen(port, "127.0.0.1", () => res({ port, srv }));
+  });
+}
+
+/** CrashBudget — N unclean exits inside the window refuse further boots with an actionable error */
+class CrashBudget {
+  constructor(max = 3, windowMs = 120000) {
+    this.max = max; this.windowMs = windowMs; this.times = [];
+  }
+  record() {
+    const now = Date.now();
+    this.times = this.times.filter((t) => now - t < this.windowMs);
+    this.times.push(now);
+    return this.exhausted();
+  }
+  exhausted() {
+    const now = Date.now();
+    this.times = this.times.filter((t) => now - t < this.windowMs);
+    return this.times.length >= this.max;
+  }
+}
+
 const http = createServer(async (req, res) => {
   try {
     let path = req.url.split("?")[0];
@@ -56,11 +105,14 @@ const wss = new WebSocketServer({ server: http, path: "/acp" });
 
 wss.on("connection", (ws) => {
   let bridge = null;
+  let lock = null;
   let sessionId = null;
+  let sessionCwd = CWD;
   let prompting = false;
+  let shuttingDown = false;
+  const crashBudget = new CrashBudget();
   /** @type {Map<string, any>} */
   const pendingPerm = new Map();
-  let sessionCwd = CWD;
 
   const send = (obj) => {
     if (ws.readyState === 1) ws.send(JSON.stringify(obj));
@@ -72,8 +124,20 @@ wss.on("connection", (ws) => {
     const { type, payload = {} } = cmd;
     try {
       if (type === "boot") {
-        bridge = new AcpBridge({ cwd: payload.cwd || CWD, profile: payload.profile || "acp" });
-        bridge.on((evt) => {
+        const profile = payload.profile || "acp";
+        if (bridge) {
+          shuttingDown = true;
+          bridge.stop();
+          bridge = null;
+          shuttingDown = false;
+        }
+        if (crashBudget.exhausted()) {
+          send({ type: "error", payload: { message: "dsh 连续崩溃多次（120 秒窗口内 ≥3 次），已停止自动重试。请检查 profile 或 dsh 安装后重试" } });
+          return;
+        }
+        if (!lock) lock = await acquireProfileLock(profile);
+        const newBridge = new AcpBridge({ cwd: payload.cwd || sessionCwd, profile });
+        newBridge.on((evt) => {
           if (evt.kind === "message") {
             const m = evt.msg;
             if (m.method === "session/update") {
@@ -85,31 +149,27 @@ wss.on("connection", (ws) => {
             const m = evt.msg;
             const method = m.method || "";
             if (/permission/i.test(method)) {
-              // surface as approval card; wait for UI decision
               const reqId = m.id;
-              const params = m.params || {};
-              send({ type: "permission/request", payload: { id: reqId, method, params } });
+              send({ type: "permission/request", payload: { id: reqId, method, params: m.params || {} } });
               pendingPerm.set(reqId, m);
-            } else if (/fs\./i.test(method)) {
-              // minimal fs capabilities we declared
-              send({ type: "acp/request", payload: { id: m.id, method, params: m.params } });
-              // auto-fail unknown fs unless simple
-              bridge.respond(m.id, null, { code: -32601, message: "fs not implemented in M1 host" });
             } else {
               send({ type: "acp/request", payload: { id: m.id, method, params: m.params } });
-              bridge.respond(m.id, null, { code: -32601, message: "method not supported by host: " + method });
+              newBridge.respond(m.id, null, { code: -32601, message: "method not supported by host: " + method });
             }
           } else if (evt.kind === "stderr") {
             send({ type: "stderr", payload: { text: evt.text } });
           } else if (evt.kind === "exit") {
-            send({ type: "exit", payload: { code: evt.code, sig: evt.sig } });
+            if (!shuttingDown) crashBudget.record();
             prompting = false;
             pendingPerm.clear();
+            bridge = null;
+            send({ type: "exit", payload: { code: evt.code, sig: evt.sig } });
           }
         });
-        const agent = await bridge.start();
-        sessionCwd = payload.cwd || CWD;
-        send({ type: "booted", payload: { agent, cwd: sessionCwd } });
+        const agent = await newBridge.start();
+        bridge = newBridge;
+        if (payload.cwd) sessionCwd = payload.cwd;
+        send({ type: "booted", payload: { agent, cwd: sessionCwd, resumed: sessionId != null } });
         return;
       }
       if (!bridge) {
@@ -130,13 +190,18 @@ wss.on("connection", (ws) => {
           return;
         }
         pendingPerm.delete(payload.id);
-        // allow/deny — shape refined when ACP request schema is confirmed
         if (payload.allow) {
           bridge.respond(payload.id, { outcome: { outcome: "selected", optionId: payload.optionId || "allow-once" } });
         } else {
           bridge.respond(payload.id, { outcome: { outcome: "cancelled" } });
         }
         send({ type: "permission/resolved", payload: { id: payload.id, allow: !!payload.allow } });
+        return;
+      }
+      if (type === "session/set_config") {
+        if (!sessionId) throw new Error("no session");
+        const result = await bridge.sessionSetConfig(sessionId, payload.configId, payload.value);
+        send({ type: "config/options", payload: { configOptions: result.configOptions || [] } });
         return;
       }
       if (type === "git/status") {
@@ -176,12 +241,8 @@ wss.on("connection", (ws) => {
         return;
       }
       if (type === "session/cancel") {
-        try {
-          await bridge.sessionCancel(sessionId);
-          send({ type: "prompt/cancelled", payload: { sessionId } });
-        } catch (e) {
-          send({ type: "error", payload: { message: String(e.message || e) } });
-        }
+        // notification — the in-flight prompt settles on its own with stopReason "cancelled"
+        bridge.sessionCancel(sessionId);
         return;
       }
       if (type === "session/close") {
@@ -191,6 +252,7 @@ wss.on("connection", (ws) => {
         return;
       }
       if (type === "shutdown") {
+        shuttingDown = true;
         bridge.stop();
         bridge = null;
         send({ type: "exit", payload: { code: 0 } });
@@ -202,7 +264,9 @@ wss.on("connection", (ws) => {
   });
 
   ws.on("close", () => {
+    shuttingDown = true;
     try { bridge?.stop(); } catch {}
+    try { lock?.srv?.close(); } catch {}
   });
 });
 

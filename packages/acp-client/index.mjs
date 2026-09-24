@@ -128,8 +128,15 @@ export class AcpBridge {
     });
   }
 
+  /** session/cancel is a NOTIFICATION in ACP — calling it with an id yields Method not found */
   sessionCancel(sessionId) {
-    return this.call("session/cancel", { sessionId });
+    this.notify("session/cancel", { sessionId });
+    return Promise.resolve({});
+  }
+
+  /** set per-session config (model / reasoning_effort); param name is `configId` (dsh deviates from spec) */
+  sessionSetConfig(sessionId, configId, value) {
+    return this.call("session/set_config_option", { sessionId, configId, value });
   }
 
   sessionClose(sessionId) {

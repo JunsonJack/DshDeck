@@ -8,6 +8,12 @@ let usageEl = null;
 let qpPage = 1;
 let qpQuery = "";
 let mqDraft = [];
+let configOptionsState = [];
+let lastSessionId = null;
+let lastCwd = "";
+let reconnecting = false;
+let pendingResume = false;
+let lastPromptText = "";
 const QP_PAGE_SIZE = 8;
 
 const DEFAULT_QP = [
@@ -346,8 +352,9 @@ function renderDiff(payload) {
 
 /* model labels from configOptions */
 function applyConfigOptions(options) {
-  const model = options.find((o) => o.id === "model");
-  const effort = options.find((o) => o.id === "reasoning_effort");
+  configOptionsState = options || [];
+  const model = configOptionsState.find((o) => o.id === "model");
+  const effort = configOptionsState.find((o) => o.id === "reasoning_effort");
   let modelLabel = "model";
   if (model) {
     const flat = [];
@@ -358,12 +365,68 @@ function applyConfigOptions(options) {
     const cur = flat.find((o) => o.value === model.currentValue) || flat[0];
     modelLabel = cur?.name || model.currentValue || "model";
   }
-  const effortLabel = effort?.currentValue || "high";
+  const effortLabel = effort?.currentValue || "…";
   document.querySelectorAll("[data-model]").forEach((n) => (n.textContent = modelLabel));
   document.querySelectorAll("[data-effort]").forEach((n) => (n.textContent = effortLabel));
 }
-function cycleModel() {
-  toast("模型/思考强度来自 dsh configOptions（M1 展示当前值）");
+
+/* alert bar (persistent, actionable) */
+function showAlert(msg, kind, actionLabel, action) {
+  const bar = $("alertBar");
+  bar.className = "alert " + (kind || "warn");
+  bar.hidden = false;
+  $("alertText").textContent = msg;
+  const btn = $("alertAction");
+  if (actionLabel && action) {
+    btn.hidden = false;
+    btn.textContent = actionLabel;
+    btn.onclick = action;
+  } else {
+    btn.hidden = true;
+  }
+}
+function hideAlert() { $("alertBar").hidden = true; }
+$("alertClose").onclick = hideAlert;
+
+/* model / effort switching (session/set_config_option via sendCmd) */
+function renderModelPop() {
+  const model = configOptionsState.find((o) => o.id === "model");
+  const flat = [];
+  for (const g of model?.options || []) {
+    for (const o of (g.options || [g])) flat.push(o);
+  }
+  $("mpModels").innerHTML = flat.map((o) => `
+    <button class="mp-item ${o.value === model?.currentValue ? "sel" : ""}" data-cid="model" data-val="${esc(o.value)}">
+      <span class="mp-check">✓</span>
+      <span>${esc(o.name)}${o.description ? `<span class="mp-desc">${esc(o.description)}</span>` : ""}</span>
+    </button>`).join("") || `<div class="hint" style="padding:4px 8px">未获取到模型列表</div>`;
+  const effort = configOptionsState.find((o) => o.id === "reasoning_effort");
+  $("mpEfforts").innerHTML = (effort?.options || []).map((o) => `
+    <button class="mp-item ${o.value === effort?.currentValue ? "sel" : ""}" data-cid="reasoning_effort" data-val="${esc(o.value)}" title="${esc(o.description || "")}">
+      <span class="mp-check">✓</span><span>${esc(o.name)} · ${esc(o.value)}</span>
+    </button>`).join("") || `<div class="hint" style="padding:4px 8px">未获取到思考强度</div>`;
+  document.querySelectorAll("#modelPop [data-cid]").forEach((btn) => {
+    btn.onclick = () => {
+      sendCmd("session/set_config", { configId: btn.dataset.cid, value: btn.dataset.val });
+      closeModelPop();
+    };
+  });
+}
+function openModelPop() { renderModelPop(); $("modelPop").classList.add("open"); }
+function closeModelPop() { $("modelPop").classList.remove("open"); }
+$("btnModel").onclick = $("btnModelW").onclick = (e) => {
+  e.stopPropagation();
+  $("modelPop").classList.contains("open") ? closeModelPop() : openModelPop();
+};
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("#modelPop") && !e.target.closest("#btnModel") && !e.target.closest("#btnModelW")) closeModelPop();
+});
+
+/* reconnect flow (M1.5 exception recovery) */
+function reconnect() {
+  hideAlert();
+  reconnecting = true;
+  sendCmd("boot", { cwd: lastCwd });
 }
 
 /* transport: Tauri IPC or WebSocket host */
@@ -397,6 +460,7 @@ const TauriCmd = {
   "session/prompt": "session_prompt",
   "session/cancel": "session_cancel",
   "session/close": "session_close",
+  "session/set_config": "session_set_config",
   "git/diff": "git_diff",
   "git/status": "git_status",
   "permission/response": "permission_response",
@@ -432,10 +496,12 @@ function sendCmd(type, payload = {}) {
           });
         } else if (type === "session/list") {
           handleMsg({ type: "session/list", payload: result });
+        } else if (type === "session/set_config") {
+          handleMsg({ type: "config/options", payload: { configOptions: result.configOptions || [] } });
         } else if (type === "session/prompt") {
           handleMsg({ type: "prompt/stop", payload: result });
         } else if (type === "session/cancel") {
-          handleMsg({ type: "prompt/cancelled", payload: {} });
+          // notification — the in-flight prompt settles separately with stopReason "cancelled"
         } else if (type === "git/diff") {
           handleMsg({ type: "git/diff", payload: result });
         } else if (type === "git/status") {
@@ -457,14 +523,26 @@ function handleMsg(msg) {
       $("healthText").textContent = `${payload.agent?.agentInfo?.name || "dsh"} · 就绪`;
       $("crumb").textContent = `工作区 ${payload.cwd}`;
       $("health").classList.remove("warn", "err");
-      // auto session + recent sessions for welcome page
-      sendCmd("session/new", {});
+      lastCwd = payload.cwd || lastCwd;
+      if (reconnecting && lastSessionId) {
+        reconnecting = false;
+        pendingResume = true;
+        sendCmd("session/resume", { sessionId: lastSessionId, cwd: lastCwd });
+      } else {
+        reconnecting = false;
+        sendCmd("session/new", {});
+      }
       sendCmd("session/list", {});
     } else if (type === "session/ready") {
       sessionId = payload.sessionId;
+      lastSessionId = payload.sessionId || lastSessionId;
+      pendingResume = false;
       applyConfigOptions(payload.configOptions || []);
       $("crumb").textContent = payload.resumed ? `已 resume · ${sessionId || ""}` : `会话 ${sessionId || ""}`;
       toast(payload.resumed ? "已恢复历史会话" : "会话已就绪");
+    } else if (type === "config/options") {
+      applyConfigOptions(payload.configOptions || []);
+      toast("模型配置已更新");
     } else if (type === "session/update") {
       const u = payload.update || {};
       if (u.sessionUpdate === "agent_message_chunk") {
@@ -496,13 +574,22 @@ function handleMsg(msg) {
     } else if (type === "prompt/stop") {
       setRunning(false);
       endStreamCursor();
-      toast("完成 · " + (payload.stopReason || ""));
+      if (payload.stopReason === "cancelled") {
+        addBlock(`<div class="say"><p class="sys-warn" style="margin:0">已中断</p></div>`);
+        toast("已中断");
+      } else {
+        toast("完成 · " + (payload.stopReason || ""));
+      }
       // refresh diff after each turn
       sendCmd("git/diff");
     } else if (type === "prompt/error") {
       setRunning(false);
       endStreamCursor();
-      addBlock(`<div class="say"><p class="sys-err" style="margin:0">出错：${esc(payload.message)}</p></div>`);
+      addBlock(`<div class="say">
+        <p class="sys-err" style="margin:0 0 8px">出错：${esc(payload.message)}</p>
+        <button class="btn" data-retry-prompt>重试上一条</button>
+      </div>`);
+      document.querySelector("[data-retry-prompt]")?.addEventListener("click", retryPrompt);
     } else if (type === "prompt/cancelled") {
       setRunning(false);
       endStreamCursor();
@@ -529,11 +616,24 @@ function handleMsg(msg) {
     } else if (type === "stderr") {
       console.warn("dsh", payload.text);
     } else if (type === "error") {
-      toast(payload.message);
+      // disconnected or pre-session failures deserve a persistent, actionable banner
+      if ($("health").classList.contains("err") || !sessionId) {
+        showAlert(payload.message, "danger", "重连", reconnect);
+      } else {
+        toast(payload.message);
+      }
     } else if (type === "exit") {
-      $("healthText").textContent = "连接已退出";
+      $("healthText").textContent = "连接已断开";
       $("health").classList.add("err");
+      showAlert("dsh 连接已断开（进程退出）。重连后会尝试恢复上一个会话。", "danger", "重连", reconnect);
     }
+}
+
+function retryPrompt() {
+  if (!lastPromptText || prompting) return;
+  addBlock(`<div class="flow"><div class="msg-user"><div class="meta">你 · 重试</div>${esc(lastPromptText)}</div></div>`);
+  streamEl = null; usageEl = null;
+  sendCmd("session/prompt", { text: lastPromptText });
 }
 
 function boot() {
@@ -545,7 +645,12 @@ function boot() {
     TauriAPI.invoke("health")
       .then((h) => {
         $("healthText").textContent = h?.ok ? "dsh 就绪" : "未找到 dsh";
-        if (!h?.ok) $("health").classList.add("warn");
+        if (!h?.ok) {
+          $("health").classList.add("warn");
+          showAlert("未找到 dsh（本机经 nvmd shim 安装）。请确认 PATH 中包含 dsh 后重试。", "warn", "重试", reconnect);
+        } else if (h?.uncleanLastExit) {
+          toast("上次未正常退出，可从「会话历史」恢复");
+        }
       })
       .catch(() => {});
     sendCmd("boot", {});
@@ -572,12 +677,12 @@ function send() {
   addBlock(`<div class="flow"><div class="msg-user"><div class="meta">你</div>${esc(text)}</div></div>`);
   ta.value = "";
   streamEl = null; usageEl = null;
+  lastPromptText = text;
   sendCmd("session/prompt", { text });
 }
 
 $("btnSendW").onclick = send;
 $("btnSend").onclick = send;
-$("btnModelW").onclick = $("btnModel").onclick = cycleModel;
 $("btnDiff").onclick = () => {
   $("diffPane").classList.toggle("open");
   sendCmd("git/diff");
@@ -602,6 +707,7 @@ $("navHist").onclick = () => {
     if (e.key === "Escape") {
       if ($("mqMask").classList.contains("open")) closeMq();
       else if ($("qpPop").classList.contains("open")) closeQp();
+      else if ($("modelPop").classList.contains("open")) closeModelPop();
       else if (prompting) send();
     }
   });

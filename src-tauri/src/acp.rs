@@ -68,6 +68,12 @@ impl Conn {
             .await
     }
 
+    /// server-bound notification (no id — e.g. session/cancel)
+    pub async fn notify(&self, method: &str, params: Value) -> Result<(), String> {
+        self.write_line(&json!({ "jsonrpc": "2.0", "method": method, "params": params }))
+            .await
+    }
+
     pub fn session_id(&self) -> Option<String> {
         self.session_id.lock().ok().and_then(|g| g.clone())
     }
@@ -91,9 +97,22 @@ impl Conn {
         .await
     }
 
+    /// session/cancel is a NOTIFICATION in ACP — the in-flight prompt settles
+    /// on its own with stopReason "cancelled".
     pub async fn session_cancel(&self) -> Result<Value, String> {
         let sid = self.session_id().ok_or("no session")?;
-        self.call("session/cancel", json!({ "sessionId": sid })).await
+        self.notify("session/cancel", json!({ "sessionId": sid })).await?;
+        Ok(json!({}))
+    }
+
+    /// per-session config set; dsh deviates from the spec: param is `configId`
+    pub async fn session_set_config(&self, config_id: &str, value: &str) -> Result<Value, String> {
+        let sid = self.session_id().ok_or("no session")?;
+        self.call(
+            "session/set_config_option",
+            json!({ "sessionId": sid, "configId": config_id, "value": value }),
+        )
+        .await
     }
 
     pub async fn session_close(&self) -> Result<Value, String> {
@@ -104,12 +123,27 @@ impl Conn {
     }
 }
 
+/// DataRootLock — one live connection per profile, via a deterministic localhost port.
+/// Binding succeeds → lock held (listener kept alive). Self-cleans on process death.
+/// Hash must match the Node host implementation (server.mjs profileLockPort).
+pub fn profile_lock_port(profile: &str) -> u16 {
+    let mut h: u32 = 0;
+    for c in profile.chars() {
+        h = h.wrapping_mul(31).wrapping_add(c as u32);
+    }
+    47700 + (h % 256) as u16
+}
+
 pub struct AcpState {
     pub cwd: String,
     child: Option<Child>,
     conn: Option<Arc<Conn>>,
     emit: Option<EmitFn>,
     booted: bool,
+    /// unclean-exit timestamps for the crash budget (reboot gate)
+    exits: Vec<std::time::Instant>,
+    /// held profile lock; dropped on replace/stop
+    _lock: Option<std::net::TcpListener>,
 }
 
 impl AcpState {
@@ -122,6 +156,8 @@ impl AcpState {
             conn: None,
             emit: None,
             booted: false,
+            exits: Vec::new(),
+            _lock: None,
         }
     }
 
@@ -135,8 +171,28 @@ impl AcpState {
         profile: Option<String>,
         on_event: impl Fn(BridgeEvent) + Send + Sync + 'static,
     ) -> Result<Value, String> {
-        if self.booted {
-            return Ok(json!({ "already": true }));
+        // previous connection still alive → keep it
+        if let Some(child) = self.child.as_mut() {
+            match child.try_wait() {
+                Ok(None) => return Ok(json!({ "already": true })),
+                Ok(Some(_)) | Err(_) => {
+                    // dsh died since last boot — count it and allow a fresh spawn
+                    self.exits.push(std::time::Instant::now());
+                    self.conn = None;
+                    self.child = None;
+                    self.booted = false;
+                }
+            }
+        } else {
+            self.booted = false;
+            self.conn = None;
+        }
+        // CrashBudget — no infinite restart loops
+        let now = std::time::Instant::now();
+        self.exits
+            .retain(|t| now.duration_since(*t) < std::time::Duration::from_secs(120));
+        if self.exits.len() >= 3 {
+            return Err("dsh 连续崩溃多次（120 秒窗口内 ≥3 次），已停止重启。请检查 profile 或 dsh 安装后重试".into());
         }
         if let Some(c) = cwd {
             if !c.is_empty() {
@@ -144,6 +200,15 @@ impl AcpState {
             }
         }
         let profile = profile.unwrap_or_else(|| "acp".into());
+        let lock = match std::net::TcpListener::bind(("127.0.0.1", profile_lock_port(&profile))) {
+            Ok(l) => l,
+            Err(_) => {
+                return Err(format!(
+                    "profile「{profile}」已有活动连接（另一个 DshDeck 窗口在运行？），同 profile 不双开"
+                ))
+            }
+        };
+        self._lock = Some(lock);
         let emit: EmitFn = Arc::new(on_event);
         self.emit = Some(emit.clone());
 
