@@ -27,13 +27,87 @@ impl Pending {
     }
 }
 
+/// Live connection handle. Commands clone it out of `AcpState` and drop the
+/// state lock before awaiting: cancel and permission responses must stay
+/// writable while a prompt is in flight.
+pub struct Conn {
+    stdin: Mutex<ChildStdin>,
+    pending: Arc<Pending>,
+    next_id: AtomicI64,
+    session_id: std::sync::Mutex<Option<String>>,
+}
+
+impl Conn {
+    async fn write_line(&self, payload: &Value) -> Result<(), String> {
+        let mut w = self.stdin.lock().await;
+        let mut s = payload.to_string();
+        s.push('\n');
+        w.write_all(s.as_bytes()).await.map_err(|e| e.to_string())?;
+        w.flush().await.map_err(|e| e.to_string())
+    }
+
+    pub async fn call(&self, method: &str, params: Value) -> Result<Value, String> {
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let (tx, rx) = oneshot::channel();
+        self.pending.map.lock().await.insert(id, tx);
+        let payload = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
+        self.write_line(&payload).await?;
+        match tokio::time::timeout(std::time::Duration::from_secs(120), rx).await {
+            Ok(Ok(res)) => res,
+            Ok(Err(_)) => Err("channel closed".into()),
+            Err(_) => {
+                self.pending.map.lock().await.remove(&id);
+                Err(format!("timeout: {method}"))
+            }
+        }
+    }
+
+    /// reply to a server→client request (permission, fs, …)
+    pub async fn respond(&self, id: i64, result: Value) -> Result<(), String> {
+        self.write_line(&json!({ "jsonrpc": "2.0", "id": id, "result": result }))
+            .await
+    }
+
+    pub fn session_id(&self) -> Option<String> {
+        self.session_id.lock().ok().and_then(|g| g.clone())
+    }
+
+    pub fn set_session_id(&self, v: Option<String>) {
+        if let Ok(mut g) = self.session_id.lock() {
+            *g = v;
+        }
+    }
+
+    pub async fn session_list(&self) -> Result<Value, String> {
+        self.call("session/list", json!({})).await
+    }
+
+    pub async fn session_prompt(&self, text: &str) -> Result<Value, String> {
+        let sid = self.session_id().ok_or("no session")?;
+        self.call(
+            "session/prompt",
+            json!({ "sessionId": sid, "prompt": [{ "type": "text", "text": text }] }),
+        )
+        .await
+    }
+
+    pub async fn session_cancel(&self) -> Result<Value, String> {
+        let sid = self.session_id().ok_or("no session")?;
+        self.call("session/cancel", json!({ "sessionId": sid })).await
+    }
+
+    pub async fn session_close(&self) -> Result<Value, String> {
+        match self.session_id() {
+            Some(sid) => self.call("session/close", json!({ "sessionId": sid })).await,
+            None => Ok(json!({})),
+        }
+    }
+}
+
 pub struct AcpState {
     pub cwd: String,
     child: Option<Child>,
-    stdin: Option<ChildStdin>,
-    next_id: AtomicI64,
-    pending: Arc<Pending>,
-    session_id: Option<String>,
+    conn: Option<Arc<Conn>>,
     emit: Option<EmitFn>,
     booted: bool,
 }
@@ -45,13 +119,14 @@ impl AcpState {
                 .map(|p| p.display().to_string())
                 .unwrap_or_else(|_| ".".into()),
             child: None,
-            stdin: None,
-            next_id: AtomicI64::new(1),
-            pending: Arc::new(Pending::new()),
-            session_id: None,
+            conn: None,
             emit: None,
             booted: false,
         }
+    }
+
+    pub fn conn(&self) -> Option<Arc<Conn>> {
+        self.conn.clone()
     }
 
     pub async fn boot(
@@ -92,11 +167,18 @@ impl AcpState {
         let stderr = child.stderr.take().ok_or("no stderr")?;
 
         self.child = Some(child);
-        self.stdin = Some(stdin);
+
+        let pending = Arc::new(Pending::new());
+        let conn = Arc::new(Conn {
+            stdin: Mutex::new(stdin),
+            pending: pending.clone(),
+            next_id: AtomicI64::new(1),
+            session_id: std::sync::Mutex::new(None),
+        });
 
         // stdout reader
         {
-            let pending = self.pending.clone();
+            let pending = pending.clone();
             let emit = emit.clone();
             tauri::async_runtime::spawn(async move {
                 let mut lines = BufReader::new(stdout).lines();
@@ -171,7 +253,7 @@ impl AcpState {
             });
         }
 
-        let agent = self
+        let agent = conn
             .call(
                 "initialize",
                 json!({
@@ -181,38 +263,11 @@ impl AcpState {
                 }),
             )
             .await?;
-        self.write_line(&json!({ "jsonrpc": "2.0", "method": "initialized", "params": {} }))
+        conn.write_line(&json!({ "jsonrpc": "2.0", "method": "initialized", "params": {} }))
             .await?;
+        self.conn = Some(conn);
         self.booted = true;
         Ok(agent)
-    }
-
-    async fn write_line(&mut self, payload: &Value) -> Result<(), String> {
-        let stdin = self.stdin.as_mut().ok_or("not booted")?;
-        let mut s = payload.to_string();
-        s.push('\n');
-        stdin
-            .write_all(s.as_bytes())
-            .await
-            .map_err(|e| e.to_string())?;
-        stdin.flush().await.map_err(|e| e.to_string())?;
-        Ok(())
-    }
-
-    async fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
-        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let (tx, rx) = oneshot::channel();
-        self.pending.map.lock().await.insert(id, tx);
-        let payload = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
-        self.write_line(&payload).await?;
-        match tokio::time::timeout(std::time::Duration::from_secs(120), rx).await {
-            Ok(Ok(res)) => res,
-            Ok(Err(_)) => Err("channel closed".into()),
-            Err(_) => {
-                self.pending.map.lock().await.remove(&id);
-                Err(format!("timeout: {method}"))
-            }
-        }
     }
 
     pub async fn session_new(&mut self, cwd: Option<String>) -> Result<Value, String> {
@@ -221,55 +276,29 @@ impl AcpState {
                 self.cwd = c;
             }
         }
-        let result = self
-            .call(
-                "session/new",
-                json!({ "cwd": self.cwd, "mcpServers": {} }),
-            )
+        let conn = self.conn.clone().ok_or("not booted")?;
+        let result = conn
+            .call("session/new", json!({ "cwd": self.cwd, "mcpServers": {} }))
             .await?;
-        self.session_id = result
-            .get("sessionId")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+        conn.set_session_id(
+            result
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+        );
         Ok(result)
-    }
-
-    pub async fn session_list(&mut self) -> Result<Value, String> {
-        self.call("session/list", json!({})).await
     }
 
     pub async fn session_resume(&mut self, session_id: &str, cwd: &str) -> Result<Value, String> {
         if !cwd.is_empty() {
             self.cwd = cwd.to_string();
         }
-        let result = self
+        let conn = self.conn.clone().ok_or("not booted")?;
+        let result = conn
             .call("session/resume", json!({ "sessionId": session_id, "cwd": cwd }))
             .await?;
-        self.session_id = Some(session_id.to_string());
+        conn.set_session_id(Some(session_id.to_string()));
         Ok(result)
-    }
-
-    pub async fn session_prompt(&mut self, text: &str) -> Result<Value, String> {
-        let sid = self.session_id.clone().ok_or("no session")?;
-        self.call(
-            "session/prompt",
-            json!({ "sessionId": sid, "prompt": [{ "type": "text", "text": text }] }),
-        )
-        .await
-    }
-
-    pub async fn session_cancel(&mut self) -> Result<Value, String> {
-        let sid = self.session_id.clone().ok_or("no session")?;
-        self.call("session/cancel", json!({ "sessionId": sid })).await
-    }
-
-    pub async fn session_close(&mut self) -> Result<Value, String> {
-        if let Some(sid) = self.session_id.clone() {
-            let r = self.call("session/close", json!({ "sessionId": sid })).await;
-            self.session_id = None;
-            return r;
-        }
-        Ok(json!({}))
     }
 }
 

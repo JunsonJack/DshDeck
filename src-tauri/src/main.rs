@@ -62,8 +62,8 @@ async fn session_new(
 
 #[tauri::command]
 async fn session_list(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let mut st = state.acp.lock().await;
-    st.session_list().await
+    let conn = state.acp.lock().await.conn().ok_or("not booted")?;
+    conn.session_list().await
 }
 
 #[tauri::command]
@@ -85,20 +85,41 @@ async fn session_prompt(
     state: State<'_, AppState>,
     text: String,
 ) -> Result<serde_json::Value, String> {
-    let mut st = state.acp.lock().await;
-    st.session_prompt(&text).await
+    let conn = state.acp.lock().await.conn().ok_or("not booted")?;
+    conn.session_prompt(&text).await
 }
 
 #[tauri::command]
 async fn session_cancel(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let mut st = state.acp.lock().await;
-    st.session_cancel().await
+    let conn = state.acp.lock().await.conn().ok_or("not booted")?;
+    conn.session_cancel().await
 }
 
 #[tauri::command]
 async fn session_close(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let mut st = state.acp.lock().await;
-    st.session_close().await
+    let conn = state.acp.lock().await.conn().ok_or("not booted")?;
+    conn.session_close().await
+}
+
+#[tauri::command]
+async fn permission_response(
+    state: State<'_, AppState>,
+    id: i64,
+    allow: bool,
+    option_id: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let conn = state.acp.lock().await.conn().ok_or("not booted")?;
+    let outcome = if allow {
+        serde_json::json!({
+            "outcome": "selected",
+            "optionId": option_id.unwrap_or_else(|| "allow-once".into())
+        })
+    } else {
+        serde_json::json!({ "outcome": "cancelled" })
+    };
+    conn.respond(id, serde_json::json!({ "outcome": outcome }))
+        .await?;
+    Ok(serde_json::json!({ "ok": true }))
 }
 
 #[tauri::command]
@@ -125,16 +146,20 @@ fn health() -> serde_json::Value {
 fn log_line(msg: &str) {
     if let Some(base) = std::env::var_os("LOCALAPPDATA") {
         let dir = std::path::PathBuf::from(base).join("DshDeck");
-        let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("app.log");
-        let _ = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .and_then(|mut f| {
-                use std::io::Write;
-                writeln!(f, "[{}] {msg}", chrono_lite_now())
-            });
+        let res = std::fs::create_dir_all(&dir).and_then(|()| {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+                .and_then(|mut f| {
+                    use std::io::Write;
+                    writeln!(f, "[{}] {msg}", chrono_lite_now())
+                })
+        });
+        if let Err(e) = res {
+            eprintln!("[dshdeck] log write failed ({}): {e}", path.display());
+        }
     }
     eprintln!("[dshdeck] {msg}");
 }
@@ -194,6 +219,7 @@ fn main() {
             session_prompt,
             session_cancel,
             session_close,
+            permission_response,
             git_diff,
             git_status,
             health,

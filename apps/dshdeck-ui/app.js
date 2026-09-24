@@ -49,42 +49,29 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 }
 
-/* heatmap */
-function renderHeat(mode) {
-  const weeks = 53;
-  const cells = [];
-  for (let w = 0; w < weeks; w++) {
-    for (let d = 0; d < 7; d++) {
-      const bias = w / weeks;
-      const n = Math.sin(w * 0.7 + d) * 0.5 + 0.5;
-      const r = n * 0.35 + bias * 0.65;
-      let level = 0;
-      if (mode === "credits") {
-        if (r > 0.92) level = 4;
-        else if (r > 0.84) level = 3;
-        else if (r > 0.72) level = 2;
-        else if (r > 0.58) level = 1;
-      } else {
-        if (r > 0.9) level = 3;
-        else if (r > 0.78) level = 2;
-        else if (r > 0.62) level = 1;
-      }
-      if (w === weeks - 1 && d === 0) level = mode === "credits" ? 4 : 3;
-      cells.push(level);
-    }
-  }
-  $("heatGrid").innerHTML = cells.map((lv) => `<div class="heat-cell${lv ? " l" + lv : ""}"></div>`).join("");
-  const monthLabels = ["10月","11月","12月","1月","2月","3月","4月","5月","6月","7月","8月","9月"];
-  $("heatMonths").innerHTML = monthLabels.map((m) => `<span style="width:${Math.round((weeks * 13) / 12)}px">${m}</span>`).join("");
+/* icons for dynamically generated markup */
+const I = {
+  chev: '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>',
+  send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
+  stop: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>',
+  up: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg>',
+  down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg>',
+  trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
+};
+
+/* theme (dark default, persisted; ?theme= overrides once) */
+function initTheme() {
+  const q = new URLSearchParams(location.search).get("theme");
+  const saved = localStorage.getItem("dshdeck.theme");
+  document.documentElement.dataset.theme =
+    q === "light" || q === "dark" ? q : saved === "light" ? "light" : "dark";
 }
-document.querySelectorAll("[data-heat]").forEach((b) => {
-  b.onclick = () => {
-    document.querySelectorAll("[data-heat]").forEach((x) => x.classList.remove("active"));
-    b.classList.add("active");
-    renderHeat(b.dataset.heat);
-  };
-});
-renderHeat("session");
+initTheme();
+$("btnTheme").onclick = () => {
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem("dshdeck.theme", next);
+};
 
 /* quick prompts */
 function qpFiltered() {
@@ -99,7 +86,7 @@ function renderQp() {
   $("qpCount").textContent = "共 " + items.length + " 条";
   $("qpList").innerHTML = slice.map((t, i) => `
     <button class="qp-item ${i === 0 ? "hl" : ""}" data-t="${esc(t)}">
-      <span class="txt">${esc(t)}</span><span class="qp-send" data-send="1">➤</span>
+      <span class="txt">${esc(t)}</span><span class="qp-send" data-send="1">${I.send}</span>
     </button>`).join("") || `<div class="hint" style="padding:16px;text-align:center">无匹配</div>`;
   $("qpPages").innerHTML = Array.from({ length: pages }, (_, i) => {
     const n = i + 1;
@@ -163,9 +150,9 @@ function renderMq() {
   $("mqList").innerHTML = mqDraft.map((t, i) => `
     <div class="mq-row" data-i="${i}">
       <input value="${esc(t)}" data-edit="${i}" />
-      <button class="mq-act" data-up="${i}">↑</button>
-      <button class="mq-act" data-down="${i}">↓</button>
-      <button class="mq-act" data-del="${i}">🗑</button>
+      <button class="mq-act" data-up="${i}" title="上移">${I.up}</button>
+      <button class="mq-act" data-down="${i}" title="下移">${I.down}</button>
+      <button class="mq-act" data-del="${i}" title="删除">${I.trash}</button>
     </div>`).join("");
   $("mqList").querySelectorAll("[data-edit]").forEach((inp) => {
     inp.oninput = () => { mqDraft[+inp.dataset.edit] = inp.value; };
@@ -206,7 +193,7 @@ function setRunning(on) {
   prompting = on;
   [$("btnSend"), $("btnSendW")].forEach((b) => {
     b.classList.toggle("stop", on);
-    b.textContent = on ? "■" : "↑";
+    b.innerHTML = on ? I.stop : I.send;
     b.title = on ? "中断" : "发送";
   });
   [$("spin"), $("spinW")].forEach((s) => s.classList.toggle("on", on));
@@ -229,7 +216,7 @@ function endStreamCursor() {
 
 /** TAO blocks */
 function addThought(messageId, text) {
-  addBlock(`<div class="flow"><details class="panel"><summary><span>▶</span><strong>思考</strong><span class="status running"><span class="run-dot"></span>Thought</span></summary><div class="panel-body" data-thought="${esc(messageId)}">${esc(text)}</div></details></div>`);
+  addBlock(`<div class="flow"><details class="panel"><summary>${I.chev}<span class="panel-title">思考</span><div class="grow"></div><span class="status running"><span class="run-dot"></span>thought</span></summary><div class="panel-body" data-thought="${esc(messageId)}">${esc(text)}</div></details></div>`);
 }
 function appendThought(messageId, text) {
   const el = document.querySelector(`[data-thought="${CSS.escape(messageId)}"]`);
@@ -242,16 +229,16 @@ function addToolCard(u) {
   const input = u.rawInput ? JSON.stringify(u.rawInput, null, 2) : "";
   addBlock(`<div class="flow"><details class="panel" id="tool-${esc(id)}" open>
     <summary>
-      <span>▶</span>
-      <strong class="mono">${esc(u.title || u.kind || "tool")}</strong>
+      ${I.chev}
+      <span class="panel-title mono">${esc(u.title || u.kind || "tool")}</span>
       <div class="grow"></div>
       <span class="status running" data-tool-st="${esc(id)}"><span class="run-dot"></span>运行中</span>
     </summary>
     <div class="panel-body">
-      <div class="hint">输入</div>
-      <pre class="code" style="margin:4px 0 8px;padding:8px 10px;background:#F3F6FA;border:1px solid var(--line);border-radius:8px;overflow:auto">${esc(input)}</pre>
-      <div class="hint">观察</div>
-      <div class="panel-body" style="padding:4px 0 0" data-tool-out="${esc(id)}"><span class="cursor-blink"></span></div>
+      <div class="blk-label">输入</div>
+      <pre>${esc(input)}</pre>
+      <div class="blk-label">观察</div>
+      <div class="tool-out" data-tool-out="${esc(id)}"><span class="cursor-blink"></span></div>
     </div>
   </details></div>`);
 }
@@ -281,64 +268,78 @@ function updateToolCard(u) {
 
 /** Permission approval card (when ACP sends request) */
 function addPermissionCard(id, method, params) {
-  const label = params?.title || params?.toolCall?.title || method;
+  const label = params?.toolCall?.title || params?.title || method;
   const desc = params?.rawInput ? JSON.stringify(params.rawInput).slice(0, 180) : (params?.kind || "");
-  addBlock(`<div class="flow"><div class="approval" id="perm-${esc(id)}" style="background:linear-gradient(180deg,#FFF8EE,#fff 45%);border:1px solid #F0D2A0;border-radius:12px;padding:14px 16px">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-      <span class="status" style="background:var(--warn-soft);color:var(--warn)">◌ 待审批</span>
-      <strong class="mono">${esc(label)}</strong>
+  // ACP spec: params.options = [{ optionId, name, kind: allow_once|allow_always|reject_once|reject_always }]
+  const opts = Array.isArray(params?.options) && params.options.length
+    ? params.options
+    : [
+        { optionId: "allow-once", name: "允许一次", kind: "allow_once" },
+        { optionId: "reject-once", name: "拒绝", kind: "reject_once" },
+      ];
+  const btns = opts.map((o) => {
+    const allow = String(o.kind || "").startsWith("allow");
+    return `<button class="btn ${allow ? "primary" : ""}" data-perm-opt="${esc(o.optionId)}" data-allow="${allow ? 1 : 0}">${esc(o.name || o.optionId)}</button>`;
+  }).join("");
+  addBlock(`<div class="flow"><div class="approval" id="perm-${esc(id)}">
+    <div class="ap-head">
+      <span class="status warn">待审批</span>
+      <span class="ap-title">${esc(label)}</span>
     </div>
-    <div style="color:var(--ink-2)">${esc(desc)}</div>
-    <div style="display:flex;gap:8px;margin-top:12px">
-      <button class="btn primary" data-perm-allow="${esc(id)}" style="height:32px;padding:0 14px;border-radius:999px">允许一次</button>
-      <button class="btn" data-perm-deny="${esc(id)}" style="height:32px;padding:0 14px;border-radius:999px;border:1px solid var(--line-2)">拒绝</button>
-    </div>
+    <div class="ap-desc">${esc(desc)}</div>
+    <div class="ap-actions">${btns}</div>
   </div></div>`);
-  document.querySelector(`[data-perm-allow="${CSS.escape(id)}"]`)?.addEventListener("click", () => {
-    resolvePerm(id, true);
-  });
-  document.querySelector(`[data-perm-deny="${CSS.escape(id)}"]`)?.addEventListener("click", () => {
-    resolvePerm(id, false);
+  document.querySelectorAll(`#perm-${CSS.escape(id)} [data-perm-opt]`).forEach((btn) => {
+    btn.addEventListener("click", () => {
+      resolvePerm(id, btn.dataset.allow === "1", btn.dataset.permOpt);
+    });
   });
 }
-function resolvePerm(id, allow) {
+function resolvePerm(id, allow, optionId) {
   const card = document.getElementById("perm-" + id);
   if (card) {
-    card.style.borderColor = allow ? "#A8E0C0" : "#F0D2A0";
-    card.innerHTML = `<div style="display:flex;align-items:center;gap:8px">
-      <span class="status ${allow ? "ok" : "denied"}">${allow ? "✓ 已批准" : "⊘ 已拒绝"}</span>
+    card.style.borderColor = "var(--line-2)";
+    card.innerHTML = `<div class="ap-head">
+      <span class="status ${allow ? "ok" : "denied"}">${allow ? "已批准" : "已拒绝"}</span>
     </div>`;
   }
-  sendCmd("permission/response", { id: Number(id) || id, allow });
+  sendCmd("permission/response", { id: Number(id) || id, allow, optionId });
 }
 
 /** Diff drawer */
 function renderDiff(payload) {
   const list = $("diffList");
   if (!payload?.ok) {
-    list.innerHTML = `<div class="hint" style="padding:16px">${esc(payload?.error || "工作区不是 git 仓库，无法审阅 diff")}</div>`;
+    list.innerHTML = `<div class="hint" style="padding:4px 2px">${esc(payload?.error || "工作区不是 git 仓库，无法审阅 diff")}</div>`;
+    $("diffMeta").textContent = "";
     return;
   }
   if (!payload.files?.length) {
-    list.innerHTML = `<div class="hint" style="padding:16px">工作区干净（无未提交改动）</div>`;
+    list.innerHTML = `<div class="hint" style="padding:4px 2px">工作区干净（无未提交改动）</div>`;
     $("diffMeta").textContent = "0 文件";
     return;
   }
   $("diffMeta").textContent = payload.files.length + " 文件";
   list.innerHTML = payload.files.map((f) => {
-    const patch = (f.patch || "")
-      .split("\n")
+    const lines = (f.patch || "").split("\n");
+    const adds = lines.filter((l) => l.startsWith("+") && !l.startsWith("+++")).length;
+    const dels = lines.filter((l) => l.startsWith("-") && !l.startsWith("---")).length;
+    const patch = lines
       .map((line) => {
-        const cls = line.startsWith("+") ? "add" : line.startsWith("-") ? "del" : "ctx";
-        return `<div class="${cls}">${esc(line)}</div>`;
+        let cls = "ctx";
+        if (line.startsWith("@@")) cls = "hunk";
+        else if (line.startsWith("+")) cls = "add";
+        else if (line.startsWith("-")) cls = "del";
+        return `<div class="${cls}">${esc(line) || " "}</div>`;
       })
       .join("");
-    return `<div class="diff-file" style="border:1px solid var(--line);border-radius:10px;margin-bottom:8px;overflow:hidden;background:#F8FAFC">
-      <div style="display:flex;gap:8px;padding:8px 10px;background:#fff;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:11px">
-        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.path)}</span>
-        <span class="hint">${esc(f.kind)}</span>
+    return `<div class="diff-file">
+      <div class="diff-file-head">
+        <span class="path">${esc(f.path)}</span>
+        <span class="stat-add">+${adds}</span><span class="stat-del">-${dels}</span>
+        <span class="kind">${esc(f.kind)}</span>
       </div>
-      <div style="font-family:var(--mono);font-size:11px;line-height:1.55;padding:6px 0">${patch || '<div class="ctx">（无 patch）</div>'}</div>
+      <div class="diff-patch">${patch || '<div class="ctx">（无 patch）</div>'}</div>
     </div>`;
   }).join("");
 }
@@ -398,6 +399,7 @@ const TauriCmd = {
   "session/close": "session_close",
   "git/diff": "git_diff",
   "git/status": "git_status",
+  "permission/response": "permission_response",
   shutdown: "session_close",
 };
 
@@ -410,8 +412,10 @@ function sendCmd(type, payload = {}) {
       args.sessionId = payload.sessionId || payload.session_id;
       args.cwd = payload.cwd || "";
     }
-    if (type === "session/prompt") args.text = payload.text;
-    handleMsg({ type: "prompt/start", payload: {} });
+    if (type === "session/prompt") {
+      args.text = payload.text;
+      handleMsg({ type: "prompt/start", payload: {} });
+    }
     TauriAPI.invoke(cmd, args)
       .then((result) => {
         if (type === "boot") {
@@ -453,8 +457,9 @@ function handleMsg(msg) {
       $("healthText").textContent = `${payload.agent?.agentInfo?.name || "dsh"} · 就绪`;
       $("crumb").textContent = `工作区 ${payload.cwd}`;
       $("health").classList.remove("warn", "err");
-      // auto session
-      ws.send(JSON.stringify({ type: "session/new" }));
+      // auto session + recent sessions for welcome page
+      sendCmd("session/new", {});
+      sendCmd("session/list", {});
     } else if (type === "session/ready") {
       sessionId = payload.sessionId;
       applyConfigOptions(payload.configOptions || []);
@@ -493,31 +498,32 @@ function handleMsg(msg) {
       endStreamCursor();
       toast("完成 · " + (payload.stopReason || ""));
       // refresh diff after each turn
-      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "git/diff" }));
+      sendCmd("git/diff");
     } else if (type === "prompt/error") {
       setRunning(false);
       endStreamCursor();
-      addBlock(`<div class="say"><p style="color:var(--danger)">出错：${esc(payload.message)}</p></div>`);
+      addBlock(`<div class="say"><p class="sys-err" style="margin:0">出错：${esc(payload.message)}</p></div>`);
     } else if (type === "prompt/cancelled") {
       setRunning(false);
       endStreamCursor();
-      addBlock(`<div class="say"><p style="color:var(--warn)">已中断</p></div>`);
+      addBlock(`<div class="say"><p class="sys-warn" style="margin:0">已中断</p></div>`);
     } else if (type === "session/list") {
       const list = payload.sessions || [];
-      $("sideTitle").textContent = "会话历史 · " + list.length;
-      $("projList").innerHTML = list.map((s) =>
-        `<button class="proj" data-sid="${esc(s.sessionId)}" data-cwd="${esc(s.cwd || "")}" title="${esc(s.cwd || "")}">
+      const row = (s) => `<button class="proj" data-sid="${esc(s.sessionId)}" data-cwd="${esc(s.cwd || "")}" title="${esc(s.cwd || "")}">
           <span class="name">${esc(s.sessionId)}</span>
-        </button>`
-      ).join("") || `<div class="hint" style="padding:12px">无历史会话</div>`;
-      $("projList").querySelectorAll("[data-sid]").forEach((btn) => {
+        </button>`;
+      $("projList").innerHTML = list.map(row).join("") || `<div class="hint" style="padding:8px">无历史会话</div>`;
+      $("recentList").innerHTML = list.slice(0, 6).map((s) => `
+        <button class="recent-row" data-sid="${esc(s.sessionId)}" data-cwd="${esc(s.cwd || "")}" title="${esc(s.cwd || "")}">
+          <span class="sid">${esc(s.sessionId)}</span><span class="cwd">${esc(s.cwd || "")}</span>
+        </button>`).join("") || `<div class="hint" style="padding:2px">暂无会话记录</div>`;
+      document.querySelectorAll("[data-sid]").forEach((btn) => {
         btn.onclick = () => {
-          if (!ws || ws.readyState !== 1) return;
           toast("resume…");
-          ws.send(JSON.stringify({
-            type: "session/resume",
-            payload: { sessionId: btn.dataset.sid, cwd: btn.dataset.cwd },
-          }));
+          sendCmd("session/resume", {
+            sessionId: btn.dataset.sid,
+            cwd: btn.dataset.cwd,
+          });
         };
       });
     } else if (type === "stderr") {
@@ -562,8 +568,8 @@ function send() {
   }
   const ta = currentInput();
   const text = ta.value.trim();
-  if (!text) { toast("输入任务或点 ☰ 选快捷消息"); return; }
-  addBlock(`<div class="flow"><div class="bubble-user"><div class="meta">你</div>${esc(text)}</div></div>`);
+  if (!text) { toast("输入任务，或从快捷消息中选择"); return; }
+  addBlock(`<div class="flow"><div class="msg-user"><div class="meta">你</div>${esc(text)}</div></div>`);
   ta.value = "";
   streamEl = null; usageEl = null;
   sendCmd("session/prompt", { text });
@@ -572,7 +578,6 @@ function send() {
 $("btnSendW").onclick = send;
 $("btnSend").onclick = send;
 $("btnModelW").onclick = $("btnModel").onclick = cycleModel;
-$("btnPerm").onclick = $("btnPerm2").onclick = () => toast("权限模式（M1：询问）");
 $("btnDiff").onclick = () => {
   $("diffPane").classList.toggle("open");
   sendCmd("git/diff");
@@ -590,14 +595,6 @@ $("navNew").onclick = () => {
 $("navHist").onclick = () => {
   sendCmd("session/list");
 };
-$("navHealth").onclick = () => toast("dsh 经 ACP 已连接（见右上状态）");
-$("modeRow").onclick = () => toast("模式：聊天");
-document.querySelectorAll("#seg button").forEach((b) => {
-  b.onclick = () => {
-    document.querySelectorAll("#seg button").forEach((x) => x.classList.remove("active"));
-    b.classList.add("active");
-  };
-});
 
 [$("inputW"), $("input")].forEach((ta) => {
   ta.addEventListener("keydown", (e) => {
@@ -610,5 +607,5 @@ document.querySelectorAll("#seg button").forEach((b) => {
   });
 });
 
-$("projList").innerHTML = `<div class="hint" style="padding:12px">点「会话历史」加载 resume 列表</div>`;
+$("projList").innerHTML = `<div class="hint" style="padding:8px">会话列表将显示在这里</div>`;
 boot();

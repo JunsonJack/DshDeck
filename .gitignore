@@ -6,3 +6,5 @@ probe-tool.txt
 probe-tool2.txt
 src-tauri/target/
 src-tauri/gen/schemas/
+run-out.txt
+run-err.txt

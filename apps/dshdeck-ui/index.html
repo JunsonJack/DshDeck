@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -12,21 +12,23 @@
   <aside class="side">
     <div class="side-top">
       <div class="brand">
-        <img class="brand-mark" src="./assets/dsh-mark.svg" alt="DshDeck" width="28" height="28" />
-        <span>DshDeck</span>
+        <img class="brand-mark" src="./assets/dsh-mark.svg" alt="" width="22" height="22" />
+        <span>DshDeck</span><span class="ver">0.1.0</span>
       </div>
     </div>
     <div class="nav-list">
-      <button class="nav-item" id="navNew"><span class="ico">⊕</span>新建会话</button>
-      <button class="nav-item" id="navHist"><span class="ico">⌕</span>会话历史</button>
-      <button class="nav-item" id="navHealth"><span class="ico">◷</span>健康检查</button>
+      <button class="nav-item" id="navNew" title="新建会话">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        <span>新建会话</span>
+      </button>
+      <button class="nav-item" id="navHist" title="会话历史（resume）">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 1.8"/></svg>
+        <span>会话历史</span>
+      </button>
     </div>
-    <div class="seg" id="seg">
-      <button class="active" data-tab="session">会话</button>
-      <button data-tab="project">项目</button>
-    </div>
-    <div class="sec-head"><span id="sideTitle">项目</span></div>
+    <div class="sec-head">会话</div>
     <div class="proj-list" id="projList"></div>
+    <div class="side-foot">dsh · acp bridge</div>
   </aside>
 
   <section class="main">
@@ -34,86 +36,98 @@
       <div class="crumb" id="crumb">未连接</div>
       <div class="grow"></div>
       <div class="pill" id="health"><span class="dot"></span><span id="healthText">启动中…</span></div>
-      <button class="win-btn" id="btnDiff" title="Diff">◫</button>
-      <button class="win-btn close" id="btnShutdown" title="关闭连接">✕</button>
+      <button class="tbtn" id="btnTheme" title="切换主题">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      </button>
+      <button class="tbtn" id="btnDiff" title="审阅改动（git diff）">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/><path d="M13 3v6h6M12 12v5M9.5 14.5h5"/></svg>
+      </button>
+      <button class="tbtn close" id="btnShutdown" title="断开连接">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
     </div>
 
     <div class="stage">
       <div class="welcome" id="welcome">
-        <img class="app-logo" src="./assets/dsh-mark.svg" alt="DshDeck" width="96" height="96" />
-        <button class="mode-row" id="modeRow"><span>💬</span><span>聊天</span><span class="caret">⌄</span></button>
+        <div class="welcome-inner">
+          <div>
+            <img class="app-logo" src="./assets/dsh-mark.svg" alt="" width="52" height="52" />
+            <h1>派个活给 dsh</h1>
+            <p class="sub">会话过程实时可见 · 工具调用需审批 · 改动可用 diff 审阅</p>
+          </div>
 
-        <div class="heat-card" id="heatCard">
-          <div class="heat-tabs">
-            <button class="active" data-heat="session">会话</button>
-            <button data-heat="credits">Credits</button>
+          <div class="composer" id="composerWelcome">
+            <textarea id="inputW" rows="2" placeholder="描述任务，派给 dsh…（Enter 发送 · Shift+Enter 换行）"></textarea>
+            <div class="bar">
+              <div class="qp-wrap"><button class="icon" title="快捷消息" id="btnQpW">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+              </button></div>
+              <div class="spin" id="spinW"></div>
+              <button class="model" id="btnModelW" title="模型 · 思考强度（当前值来自 dsh）">
+                <span data-model>…</span><span class="sep">·</span><span data-effort>…</span>
+              </button>
+              <button class="send" id="btnSendW" title="发送">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+              </button>
+            </div>
           </div>
-          <div class="heat-grid-wrap">
-            <div class="heat-grid" id="heatGrid"></div>
-            <div class="heat-months" id="heatMonths"></div>
-          </div>
-          <div class="heat-legend">
-            <span>少</span>
-            <span class="heat-cell"></span>
-            <span class="heat-cell l1"></span>
-            <span class="heat-cell l2"></span>
-            <span class="heat-cell l3"></span>
-            <span class="heat-cell l4"></span>
-            <span>多</span>
-          </div>
-        </div>
 
-        <div class="composer" id="composerWelcome">
-          <textarea id="inputW" rows="2" placeholder="输入消息，@ 引用文件，/ 运行命令，&amp; 引用会话..."></textarea>
-          <div class="bar">
-            <button class="icon" title="权限模式" id="btnPerm">🛡</button>
-            <div class="qp-wrap"><button class="icon" title="快捷提示词" id="btnQpW">☰</button></div>
-            <div class="spin" id="spinW"></div>
-            <button class="model" id="btnModelW" title="模型 · 思考">
-              <span data-model>…</span><span class="sep">·</span><span data-effort>思考</span><span class="caret">⌄</span>
-            </button>
-            <button class="send" id="btnSendW" title="发送">↑</button>
+          <div class="recent" id="recent">
+            <div class="recent-head"><span>最近会话</span></div>
+            <div id="recentList"><div class="hint" style="padding:4px 2px">加载中…</div></div>
           </div>
         </div>
       </div>
 
       <div class="stream" id="stream"></div>
+
       <div class="dock">
         <div class="composer">
-          <textarea id="input" rows="2" placeholder="输入消息，@ 引用文件，/ 运行命令，&amp; 引用会话..."></textarea>
+          <textarea id="input" rows="2" placeholder="描述任务，派给 dsh…（Enter 发送 · Shift+Enter 换行）"></textarea>
           <div class="bar">
-            <button class="icon" title="权限模式" id="btnPerm2">🛡</button>
-            <div class="qp-wrap"><button class="icon" title="快捷提示词" id="btnQp">☰</button></div>
+            <div class="qp-wrap"><button class="icon" title="快捷消息" id="btnQp">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+            </button></div>
             <div class="spin" id="spin"></div>
-            <button class="model" id="btnModel" title="模型 · 思考">
-              <span data-model>…</span><span class="sep">·</span><span data-effort>思考</span><span class="caret">⌄</span>
+            <button class="model" id="btnModel" title="模型 · 思考强度（当前值来自 dsh）">
+              <span data-model>…</span><span class="sep">·</span><span data-effort>…</span>
             </button>
-            <button class="send" id="btnSend" title="发送">↑</button>
+            <button class="send" id="btnSend" title="发送">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+            </button>
           </div>
         </div>
       </div>
 
       <div class="diff" id="diffPane">
         <div class="diff-head">
-          <span>DIFF</span><div class="grow"></div>
-          <button class="icon" id="diffClose">✕</button>
+          <span>改动审阅</span><span class="diff-meta" id="diffMeta"></span>
+          <div class="grow"></div>
+          <button class="icon" id="diffClose" title="关闭">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
         </div>
-        <div class="diff-list hint" style="padding:16px">M1：工具写文件后展示 git diff（M2）。</div>
+        <div class="diff-list hint" id="diffList" style="padding:14px">派活后点这里审阅工作区改动（git diff）。</div>
       </div>
 
       <div class="qp-pop" id="qpPop">
         <div class="qp-top">
-          <div class="qp-search"><span>⌕</span><input id="qpSearch" placeholder="搜索快捷消息..." /></div>
-          <button class="qp-icon" id="qpSort" title="管理">⚙</button>
+          <div class="qp-search">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+            <input id="qpSearch" placeholder="搜索快捷消息…" />
+          </div>
+          <button class="qp-icon" id="qpSort" title="管理快捷消息">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>
+          </button>
         </div>
-        <div class="qp-tip">点条目插入输入框，条目右侧按钮直接发送（回车插入首条）</div>
+        <div class="qp-tip">点条目插入输入框 · 右侧箭头直接发送 · 回车插入首条</div>
         <div class="qp-list" id="qpList"></div>
         <div class="qp-foot">
           <span id="qpCount"></span><div class="grow"></div>
           <div class="qp-pager">
-            <button class="qp-page nav" id="qpPrev">‹</button>
+            <button class="qp-page" id="qpPrev">‹</button>
             <span id="qpPages"></span>
-            <button class="qp-page nav" id="qpNext">›</button>
+            <button class="qp-page" id="qpNext">›</button>
           </div>
         </div>
       </div>
@@ -124,16 +138,18 @@
 <div class="modal-mask" id="mqMask">
   <div class="modal">
     <div class="modal-head">
-      <h2>快捷消息条目</h2>
-      <p>排序 / 增删；最多 30 条。点「完成」写入本地配置。</p>
-      <button class="icon close" id="mqClose">✕</button>
+      <h2>管理快捷消息</h2>
+      <p>排序 / 增删，最多 30 条，保存在本机。</p>
+      <button class="close" id="mqClose" title="关闭">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
     </div>
     <div class="modal-body" id="mqList"></div>
     <div class="modal-mid">
       <button class="btn" id="mqAdd">＋ 添加</button>
     </div>
     <div class="modal-foot">
-      <button class="linkish" id="mqReset">↻ 恢复默认</button>
+      <button class="linkish" id="mqReset">恢复默认</button>
       <div class="grow"></div>
       <button class="btn primary" id="mqDone">完成</button>
     </div>
