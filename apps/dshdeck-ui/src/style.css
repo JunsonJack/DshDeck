@@ -277,7 +277,7 @@ body.chat-mode .welcome { display: none; }
 }
 body.chat-mode .stream { display: flex; }
 body.chat-mode .dock { display: block; }
-.dock { display: none; padding: 0 24px 14px; background: linear-gradient(to top, var(--bg-0) 65%, transparent); }
+.dock { display: none; flex-shrink: 0; padding: 0 24px 14px; background: linear-gradient(to top, var(--bg-0) 65%, transparent); }
 .dock .composer { margin: 0 auto; width: min(840px, 100%); }
 .queue-bar {
   display: flex; align-items: center; gap: 8px; width: min(840px, 100%); margin: 0 auto 8px;

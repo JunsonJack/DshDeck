@@ -205,8 +205,10 @@ export function handleMsg(msg: Msg) {
   }
 }
 
-function applySessionUpdate(u: any) {
+function applySessionUpdate(payload: any) {
   const chat = useChatStore();
+  // dsh wraps the event: params = { sessionId, update: { sessionUpdate, ... } }
+  const u = payload?.update ?? payload;
   const kind = u?.sessionUpdate;
   if (kind === "agent_message_chunk") {
     let live = ensureStream();
