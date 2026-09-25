@@ -4,7 +4,10 @@
   "version": "0.1.0",
   "identifier": "dev.dshdeck.desktop",
   "build": {
-    "frontendDist": "../apps/dshdeck-ui"
+    "beforeBuildCommand": "npm --prefix apps/dshdeck-ui run build",
+    "beforeDevCommand": "npm --prefix apps/dshdeck-ui run dev",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../apps/dshdeck-ui/dist"
   },
   "app": {
     "withGlobalTauri": true,

@@ -7,6 +7,8 @@
   "scripts": {
     "probe": "node probe/acp-probe.mjs",
     "dev:host": "node apps/dshdeck-host/server.mjs",
+    "dev:ui": "npm --prefix apps/dshdeck-ui run dev",
+    "typecheck:ui": "npm --prefix apps/dshdeck-ui run typecheck",
     "dev": "tauri dev",
     "build": "tauri build",
     "start": "node apps/dshdeck-host/server.mjs"

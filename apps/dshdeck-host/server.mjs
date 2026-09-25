@@ -17,7 +17,7 @@ import { readModelConfig } from "../../packages/dsh-readonly/model-config.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "../..");
-const uiDir = join(root, "apps", "dshdeck-ui");
+const uiDir = join(root, "apps", "dshdeck-ui", "dist");
 
 const args = process.argv.slice(2);
 function argVal(f, d) {
