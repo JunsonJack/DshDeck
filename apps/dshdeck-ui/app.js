@@ -17,6 +17,8 @@ let lastPromptText = "";
 let healthState = null;
 let agentInfoState = null;
 let connectionOk = false;
+let modelConfigState = null;
+const lastTitles = {};
 const QP_PAGE_SIZE = 8;
 
 const DEFAULT_QP = [
@@ -427,6 +429,7 @@ function saveCustomModels(list) {
 function openSettings() {
   $("settingsView").classList.add("open");
   renderSettings();
+  sendCmd("model/config", { profile: "acp" });
 }
 function closeSettings() {
   $("settingsView").classList.remove("open");
@@ -460,35 +463,65 @@ function renderSettings() {
 }
 
 function renderSettingsModels() {
-  const model = configOptionsState.find((o) => o.id === "model");
-  const flat = [];
-  for (const g of model?.options || []) {
-    for (const o of g.options || [g]) flat.push(o);
-  }
-  const customs = loadCustomModels();
-  const cur = model?.currentValue;
-  const row = (name, val, source) => `
-    <div class="model-row">
-      <span class="m-name">${esc(name)}</span>
-      <span class="m-val">${esc(val)}</span>
-      <span class="chip ${source}">${source === "dsh" ? "dsh" : "自定义"}</span>
-      ${val === cur ? `<span class="chip cur">当前</span>` : ""}
-      <button class="btn" data-use="${esc(val)}" ${sessionId ? "" : "disabled"}>切换</button>
-      ${source === "custom" ? `<button class="btn danger" data-del="${esc(val)}">删除</button>` : ""}
+  const host = $("settingsModels");
+  const mc = modelConfigState;
+  const modelOpt = configOptionsState.find((o) => o.id === "model");
+  const cur = modelOpt?.currentValue;
+  const def = mc?.defaults?.[mc.activeProfile];
+  const headRow = `<div class="m-tr head"><span>ID</span><span>名称</span><span>上下文</span><span>Profile</span><span>操作</span></div>`;
+  const opSwitch = (value, active) => (!sessionId
+    ? `<button class="btn" disabled title="会话未就绪">切换</button>`
+    : active === false
+      ? `<button class="btn" disabled title="该模型定义在其它 profile；当前 profile 未配置（壳不代写 ~/.dsh）">需配置</button>`
+      : `<button class="btn" data-use="${esc(value)}">切换</button>`);
+  const row = (id, name, ctx, profiles, chips, ops) => `
+    <div class="m-tr">
+      <span class="mono">${esc(id)}</span>
+      <span>${esc(name)}${chips}</span>
+      <span class="mono">${ctx ? esc(ctx) : ""}</span>
+      <span>${(profiles || []).map((p) => `<span class="chip prof">${esc(p)}</span>`).join("")}</span>
+      <span class="ops">${ops}</span>
     </div>`;
-  const dshRows = flat.map((o) => row(o.name || o.value, o.value, "dsh")).join("");
-  const customRows = customs.map((m) => row(m.name, m.value, "custom")).join("");
-  $("settingsModels").innerHTML =
-    (dshRows || `<div class="hint" style="padding:4px 0 8px">尚未获取到 dsh 模型列表（需要已连接的会话）</div>`) +
-    customRows;
-  document.querySelectorAll("#settingsModels [data-use]").forEach((btn) => {
+
+  const provs = (mc?.providers || []).map((p) => {
+    const rows = p.models.map((m) => {
+      const value = JSON.stringify([p.key, m.id]);
+      const isDef = !!(def && def.provider === p.key && def.model === m.id);
+      return row(
+        m.id, m.name, m.contextWindow, m.profiles,
+        isDef ? `<span class="chip cur">默认</span>` : (m.active ? "" : `<span class="chip">未在本 profile</span>`),
+        opSwitch(value, m.active)
+      );
+    }).join("");
+    return `<details class="prov"${p.models.some((m) => m.active) ? " open" : ""}>
+      <summary>
+        <span class="p-name">${esc(p.displayName)}</span>
+        <span class="chip">${p.models.length} 模型</span>
+        <span class="p-base">${esc(p.baseURL || "")}</span>
+      </summary>
+      <div class="m-table">${headRow}${rows || `<div class="m-tr"><span class="hint">无模型</span></div>`}</div>
+    </details>`;
+  }).join("") || `<div class="hint" style="padding:4px 0 10px">正在读取 dsh 模型配置…</div>`;
+
+  const customs = loadCustomModels();
+  const customRows = customs.map((m) =>
+    row(m.name, m.value, "", ["本机"], "",
+      opSwitch(m.value, true) + `<button class="btn danger" data-del="${esc(m.value)}">删除</button>`)
+  ).join("");
+  const customCard = `<details class="prov"${customs.length ? " open" : ""}>
+      <summary><span class="p-name">自定义</span><span class="chip">${customs.length} 模型</span><span class="p-base">仅保存在本机</span></summary>
+      <div class="m-table">${headRow}${customRows || `<div class="m-tr"><span class="hint">暂无自定义模型</span></div>`}</div>
+    </details>`;
+
+  host.innerHTML = `<div class="prov-toolbar"><span>${(mc?.providers || []).length + 1} 个供应商</span></div>${provs}${customCard}`;
+  host.querySelectorAll("[data-use]").forEach((btn) => {
     btn.onclick = () => {
       if (!sessionId) { toast("会话未就绪，无法切换"); return; }
       sendCmd("session/set_config", { configId: "model", value: btn.dataset.use });
       toast("已下发切换，dsh 返回后刷新");
     };
   });
-  document.querySelectorAll("#settingsModels [data-del]").forEach((btn) => {
+  host.querySelectorAll("[data-del]").forEach((btn) => {
     btn.onclick = () => {
       saveCustomModels(loadCustomModels().filter((m) => m.value !== btn.dataset.del));
       renderSettingsModels();
@@ -588,6 +621,7 @@ const TauriCmd = {
   "session/close": "session_close",
   "session/set_config": "session_set_config",
   "session/replay": "session_replay",
+  "model/config": "model_config",
   "git/diff": "git_diff",
   "git/status": "git_status",
   "permission/response": "permission_response",
@@ -627,6 +661,8 @@ function sendCmd(type, payload = {}) {
           handleMsg({ type: "config/options", payload: { configOptions: result.configOptions || [] } });
         } else if (type === "session/replay") {
           handleMsg({ type: "session/replay", payload: result });
+        } else if (type === "model/config") {
+          handleMsg({ type: "model/config", payload: result });
         } else if (type === "session/prompt") {
           handleMsg({ type: "prompt/stop", payload: result });
         } else if (type === "session/cancel") {
@@ -669,11 +705,17 @@ function handleMsg(msg) {
       lastSessionId = payload.sessionId || lastSessionId;
       pendingResume = false;
       applyConfigOptions(payload.configOptions || []);
-      $("crumb").textContent = payload.resumed ? `已 resume · ${sessionId || ""}` : `会话 ${sessionId || ""}`;
+      const t = lastTitles[payload.sessionId];
+      $("crumb").textContent = payload.resumed
+        ? `已恢复 · ${t || payload.sessionId || ""}`
+        : `会话 ${payload.sessionId || ""}`;
       toast(payload.resumed ? "已恢复历史会话" : "会话已就绪");
       if (payload.resumed) sendCmd("session/replay", { sessionId, cwd: lastCwd });
     } else if (type === "session/replay") {
       renderReplay(payload);
+    } else if (type === "model/config") {
+      modelConfigState = payload;
+      if ($("settingsView").classList.contains("open")) renderSettingsModels();
     } else if (type === "config/options") {
       applyConfigOptions(payload.configOptions || []);
       toast("模型配置已更新");
@@ -731,13 +773,18 @@ function handleMsg(msg) {
       addBlock(`<div class="say"><p class="sys-warn" style="margin:0">已中断</p></div>`);
     } else if (type === "session/list") {
       const list = payload.sessions || [];
-      const row = (s) => `<button class="proj" data-sid="${esc(s.sessionId)}" data-cwd="${esc(s.cwd || "")}" title="${esc(s.cwd || "")}">
-          <span class="name">${esc(s.sessionId)}</span>
+      for (const s of list) {
+        if (s.sessionId && s.title) lastTitles[s.sessionId] = s.title;
+      }
+      const label = (s) => s.title || s.sessionId;
+      const tip = (s) => `${s.title ? "标题: " + s.title + "\n" : ""}ID: ${s.sessionId}\n${s.cwd || ""}`;
+      const row = (s) => `<button class="proj" data-sid="${esc(s.sessionId)}" data-cwd="${esc(s.cwd || "")}" title="${esc(tip(s))}">
+          <span class="name">${esc(label(s))}</span>
         </button>`;
       $("projList").innerHTML = list.map(row).join("") || `<div class="hint" style="padding:8px">无历史会话</div>`;
       $("recentList").innerHTML = list.slice(0, 6).map((s) => `
-        <button class="recent-row" data-sid="${esc(s.sessionId)}" data-cwd="${esc(s.cwd || "")}" title="${esc(s.cwd || "")}">
-          <span class="sid">${esc(s.sessionId)}</span><span class="cwd">${esc(s.cwd || "")}</span>
+        <button class="recent-row" data-sid="${esc(s.sessionId)}" data-cwd="${esc(s.cwd || "")}" title="${esc(tip(s))}">
+          <span class="sid">${esc(label(s))}</span><span class="cwd">${esc(s.cwd || "")}</span>
         </button>`).join("") || `<div class="hint" style="padding:2px">暂无会话记录</div>`;
       document.querySelectorAll("[data-sid]").forEach((btn) => {
         btn.onclick = () => {

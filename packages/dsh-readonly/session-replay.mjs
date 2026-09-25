@@ -10,7 +10,7 @@ import zlib from "node:zlib";
 
 const MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
 
-function decodeFrames(buf) {
+export function decodeFrames(buf) {
   const offs = [];
   let i = 0;
   while ((i = buf.indexOf(MAGIC, i)) !== -1) {
@@ -84,7 +84,7 @@ function mapEvents(lines) {
 }
 
 /** locate the session file: fast path via encoded cwd dir, fallback to a header scan */
-function locate(sessionId, cwd, dshDir) {
+export function locate(sessionId, cwd, dshDir) {
   const bare = String(sessionId).replace(/^session-/, "");
   const root = dshDir ? join(dshDir, "sessions") : join(process.env.USERPROFILE || "", ".dsh", "sessions");
   if (!existsSync(root)) throw new Error("未找到 ~/.dsh/sessions 目录");
@@ -116,4 +116,24 @@ export function readSessionReplay(sessionId, cwd, dshDir) {
   } catch (e) {
     return { ok: false, error: String(e.message || e), events: [] };
   }
+}
+
+/** titles for a batch of sessions: pairs = [{ sessionId, cwd }] → { sessionId: title } */
+export function readSessionTitles(pairs, dshDir) {
+  const out = {};
+  for (const { sessionId, cwd } of pairs || []) {
+    try {
+      const p = locate(sessionId, cwd, dshDir);
+      const data = decodeFrames(readFileSync(p)).toString("utf8");
+      let title = null;
+      for (const l of data.split("\n")) {
+        try {
+          const o = JSON.parse(l);
+          if (o.type === "session/title" && o.data?.title) title = o.data.title;
+        } catch { /* skip malformed */ }
+      }
+      if (title) out[sessionId] = title;
+    } catch { /* file missing / undecodable — leave untitled */ }
+  }
+  return out;
 }

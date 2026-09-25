@@ -12,7 +12,8 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { AcpBridge } from "../../packages/acp-client/index.mjs";
 import { gitDiff, gitStatus } from "../../packages/acp-client/git-diff.mjs";
-import { readSessionReplay } from "../../packages/dsh-readonly/session-replay.mjs";
+import { readSessionReplay, readSessionTitles } from "../../packages/dsh-readonly/session-replay.mjs";
+import { readModelConfig } from "../../packages/dsh-readonly/model-config.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "../..");
@@ -219,7 +220,17 @@ wss.on("connection", (ws) => {
         return;
       }
       if (type === "session/list") {
-        send({ type: "session/list", payload: await bridge.sessionList() });
+        const list = await bridge.sessionList();
+        const sessions = list.sessions || [];
+        const titles = readSessionTitles(sessions.map((s) => ({ sessionId: s.sessionId, cwd: s.cwd })));
+        send({
+          type: "session/list",
+          payload: { sessions: sessions.map((s) => ({ ...s, title: titles[s.sessionId] || null })) },
+        });
+        return;
+      }
+      if (type === "model/config") {
+        send({ type: "model/config", payload: readModelConfig(payload.profile || "acp") });
         return;
       }
       if (type === "session/resume") {

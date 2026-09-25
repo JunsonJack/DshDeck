@@ -13,6 +13,7 @@ struct AppState {
     acp: AsyncMutex<AcpState>,
     cwd: Mutex<String>,
     unclean_last_exit: Mutex<bool>,
+    profile: Mutex<String>,
 }
 
 fn emit(app: &tauri::AppHandle, event: &str, payload: serde_json::Value) {
@@ -28,7 +29,7 @@ async fn boot(
 ) -> Result<serde_json::Value, String> {
     let mut st = state.acp.lock().await;
     let agent = st
-        .boot(cwd.clone(), profile, {
+        .boot(cwd.clone(), profile.clone(), {
             let app = app.clone();
             move |evt| {
                 match evt.kind {
@@ -45,6 +46,9 @@ async fn boot(
         .await?;
     if let Ok(mut c) = state.cwd.lock() {
         *c = st.cwd.clone();
+    }
+    if let Ok(mut p) = state.profile.lock() {
+        *p = profile.unwrap_or_else(|| "acp".into());
     }
     Ok(agent)
 }
@@ -65,7 +69,15 @@ async fn session_new(
 #[tauri::command]
 async fn session_list(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     let conn = state.acp.lock().await.conn().ok_or("not booted")?;
-    conn.session_list().await
+    let mut r = conn.session_list().await?;
+    dsh_read::attach_titles(&mut r);
+    Ok(r)
+}
+
+#[tauri::command]
+fn model_config(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let profile = state.profile.lock().map(|p| p.clone()).unwrap_or_else(|_| "acp".into());
+    dsh_read::read_model_config(&profile)
 }
 
 #[tauri::command]
@@ -252,6 +264,7 @@ fn main() {
             acp: AsyncMutex::new(AcpState::new()),
             cwd: Mutex::new(String::new()),
             unclean_last_exit: Mutex::new(unclean),
+            profile: Mutex::new("acp".into()),
         })
         .setup(|app| {
             use tauri::WebviewWindowBuilder;
@@ -282,6 +295,7 @@ fn main() {
             session_close,
             session_set_config,
             session_replay,
+            model_config,
             permission_response,
             git_diff,
             git_status,

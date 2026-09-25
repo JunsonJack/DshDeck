@@ -121,16 +121,16 @@ code, .mono { font-family: var(--mono); }
 .side-foot { display: flex; align-items: center; gap: 6px; padding: 8px 10px 8px 8px; border-top: 1px solid var(--line); color: var(--ink-3); font-size: 11px; font-family: var(--mono); }
 
 /* ---------- settings (modal: menu + panes) ---------- */
-.settings-modal { width: min(760px, 100%); height: min(560px, 84vh); display: flex; flex-direction: column; position: relative; }
-.settings-modal > .close {
+.modal.settings-modal { width: min(880px, 100%); height: min(600px, 86vh); display: flex; flex-direction: column; position: relative; }
+.modal.settings-modal > .close {
   position: absolute; top: 10px; right: 10px; width: 28px; height: 28px;
   border-radius: 6px; color: var(--ink-2); display: grid; place-items: center;
 }
-.settings-modal > .close:hover { background: var(--bg-3); color: var(--ink); }
-.settings-modal > .close svg { width: 14px; height: 14px; }
+.modal.settings-modal > .close:hover { background: var(--bg-3); color: var(--ink); }
+.modal.settings-modal > .close svg { width: 14px; height: 14px; }
 .settings-modal-body { display: flex; flex: 1; min-height: 0; }
 .settings-menu {
-  width: 176px; flex: none; border-right: 1px solid var(--line);
+  width: 150px; flex: none; border-right: 1px solid var(--line);
   padding: 14px 8px; display: flex; flex-direction: column; gap: 2px;
 }
 .settings-menu-title { font-size: 13px; font-weight: 600; padding: 0 10px 10px; }
@@ -168,6 +168,28 @@ code, .mono { font-family: var(--mono); }
   font-size: 12px; font-family: var(--mono); min-width: 0;
 }
 .add-model input:focus { border-color: var(--accent); }
+.prov-toolbar { display: flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 12px; margin-bottom: 10px; }
+.prov { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; overflow: hidden; background: var(--bg-2); }
+.prov > summary {
+  list-style: none; display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; cursor: pointer; user-select: none;
+}
+.prov > summary::-webkit-details-marker { display: none; }
+.prov > summary:hover { background: var(--bg-3); }
+.prov .p-name { font-weight: 600; font-size: 12.5px; }
+.prov .p-base { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.m-table { border-top: 1px solid var(--line); }
+.m-tr {
+  display: grid; grid-template-columns: minmax(130px, 1.1fr) minmax(110px, 1fr) 80px minmax(100px, auto) auto;
+  gap: 8px; align-items: center; padding: 6px 12px; font-size: 11.5px;
+}
+.m-tr.head {
+  color: var(--ink-3); font-size: 10px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.6px; background: var(--bg-3);
+}
+.m-tr .mono { font-family: var(--mono); font-size: 11px; }
+.m-tr .ops { display: flex; gap: 6px; justify-content: flex-end; }
+.chip.prof { font-size: 9.5px; padding: 1px 6px; }
 
 /* ---------- titlebar ---------- */
 .titlebar { display: flex; align-items: center; gap: 6px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--line); background: var(--bg-0); }

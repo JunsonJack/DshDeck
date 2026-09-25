@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "dompurify": "^3.4.16",
+    "js-yaml": "^5.4.2",
     "marked": "^18.0.14",
     "png-to-ico": "^3.0.2",
     "ws": "^8.18.0"
