@@ -488,6 +488,7 @@ const TauriCmd = {
   "session/cancel": "session_cancel",
   "session/close": "session_close",
   "session/set_config": "session_set_config",
+  "session/replay": "session_replay",
   "git/diff": "git_diff",
   "git/status": "git_status",
   "permission/response": "permission_response",
@@ -525,6 +526,8 @@ function sendCmd(type, payload = {}) {
           handleMsg({ type: "session/list", payload: result });
         } else if (type === "session/set_config") {
           handleMsg({ type: "config/options", payload: { configOptions: result.configOptions || [] } });
+        } else if (type === "session/replay") {
+          handleMsg({ type: "session/replay", payload: result });
         } else if (type === "session/prompt") {
           handleMsg({ type: "prompt/stop", payload: result });
         } else if (type === "session/cancel") {
@@ -567,6 +570,9 @@ function handleMsg(msg) {
       applyConfigOptions(payload.configOptions || []);
       $("crumb").textContent = payload.resumed ? `已 resume · ${sessionId || ""}` : `会话 ${sessionId || ""}`;
       toast(payload.resumed ? "已恢复历史会话" : "会话已就绪");
+      if (payload.resumed) sendCmd("session/replay", { sessionId, cwd: lastCwd });
+    } else if (type === "session/replay") {
+      renderReplay(payload);
     } else if (type === "config/options") {
       applyConfigOptions(payload.configOptions || []);
       toast("模型配置已更新");
@@ -711,6 +717,36 @@ function retryPrompt() {
   addBlock(`<div class="flow"><div class="msg-user"><div class="meta">你 · 重试</div>${esc(lastPromptText)}</div></div>`);
   resetStream();
   sendCmd("session/prompt", { text: lastPromptText });
+}
+
+/** replay of stored history (~/.dsh/sessions, read-only parse) — degraded per contract */
+function renderReplay(payload) {
+  if (!payload?.ok) {
+    addBlock(`<div class="say"><p class="hint" style="margin:0">历史消息不可回放：${esc(payload?.error || "未知原因")}</p></div>`);
+    return;
+  }
+  const evs = payload.events || [];
+  if (!evs.length) return;
+  addBlock(`<div class="replay-divider"><span>历史回放 · ${evs.length} 条</span></div>`);
+  for (const ev of evs) {
+    if (ev.kind === "user") {
+      addBlock(`<div class="flow"><div class="msg-user"><div class="meta">你</div>${esc(ev.text)}</div></div>`);
+    } else if (ev.kind === "assistant") {
+      addBlock(`<div class="flow"><div class="msg-stream${mdParse ? " md" : ""}">${renderMarkdown(ev.text)}</div></div>`);
+    } else if (ev.kind === "thought") {
+      addBlock(`<div class="flow"><details class="panel"><summary>${I.chev}<span class="panel-title">思考</span></summary><div class="panel-body${mdParse ? " md" : ""}">${renderMarkdown(ev.text)}</div></details></div>`);
+    } else if (ev.kind === "tool_call") {
+      const input = ev.rawInput == null ? "" : typeof ev.rawInput === "string" ? ev.rawInput : JSON.stringify(ev.rawInput, null, 2);
+      addBlock(`<div class="flow"><details class="panel" data-rcard="${esc(ev.id)}">
+        <summary>${I.chev}<span class="panel-title mono">${esc(ev.title || "tool")}</span><div class="grow"></div><span class="status ok" data-rst="${esc(ev.id)}">完成</span></summary>
+        <div class="panel-body"><div class="blk-label">输入</div><pre>${esc(input)}</pre><div class="blk-label">观察</div><div class="tool-out" data-rout="${esc(ev.id)}"></div></div>
+      </details></div>`);
+    } else if (ev.kind === "tool_result") {
+      const out = document.querySelector(`[data-rout="${CSS.escape(ev.id)}"]`);
+      if (out) out.textContent = ev.text || "";
+    }
+  }
+  $("stream").scrollTop = $("stream").scrollHeight;
 }
 
 function boot() {

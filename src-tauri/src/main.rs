@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod acp;
+mod dsh_read;
 
 use acp::AcpState;
 use std::sync::Mutex;
@@ -110,6 +111,20 @@ async fn session_set_config(
 ) -> Result<serde_json::Value, String> {
     let conn = state.acp.lock().await.conn().ok_or("not booted")?;
     conn.session_set_config(&config_id, &value).await
+}
+
+#[tauri::command]
+fn session_replay(
+    state: State<'_, AppState>,
+    session_id: String,
+    cwd: String,
+) -> Result<serde_json::Value, String> {
+    let cwd = if cwd.is_empty() {
+        state.cwd.lock().map(|c| c.clone()).unwrap_or_default()
+    } else {
+        cwd
+    };
+    dsh_read::session_replay(&session_id, &cwd)
 }
 
 #[tauri::command]
@@ -266,6 +281,7 @@ fn main() {
             session_cancel,
             session_close,
             session_set_config,
+            session_replay,
             permission_response,
             git_diff,
             git_status,

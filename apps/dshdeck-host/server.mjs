@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { AcpBridge } from "../../packages/acp-client/index.mjs";
 import { gitDiff, gitStatus } from "../../packages/acp-client/git-diff.mjs";
+import { readSessionReplay } from "../../packages/dsh-readonly/session-replay.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "../..");
@@ -202,6 +203,11 @@ wss.on("connection", (ws) => {
         if (!sessionId) throw new Error("no session");
         const result = await bridge.sessionSetConfig(sessionId, payload.configId, payload.value);
         send({ type: "config/options", payload: { configOptions: result.configOptions || [] } });
+        return;
+      }
+      if (type === "session/replay") {
+        // read-only ~/.dsh/sessions parse — never blocks the live connection
+        send({ type: "session/replay", payload: readSessionReplay(payload.sessionId, payload.cwd) });
         return;
       }
       if (type === "git/status") {

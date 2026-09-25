@@ -83,6 +83,20 @@ ws.on("open", async () => {
     const rebooted = await waitOnce("booted", 40000);
     check("reconnect boot", !!rebooted.payload?.agent?.agentInfo);
 
+    // 8b. resume + replay the session we just talked in (read-only ~/.dsh/sessions parse)
+    send("session/list", {});
+    const listMsg = await waitOnce("session/list", 20000);
+    const sessions = listMsg.payload?.sessions || [];
+    check("session/list has entries", sessions.length > 0);
+    const target = sessions[0];
+    const repCwd = target.cwd || "E:\\VibeCodingProject\\DshDeck";
+    send("session/resume", { sessionId: target.sessionId, cwd: repCwd });
+    await waitOnce("session/ready", 20000);
+    send("session/replay", { sessionId: target.sessionId, cwd: repCwd });
+    const rep = await waitOnce("session/replay", 20000);
+    check("replay ok", rep.payload?.ok === true, rep.payload?.error);
+    check("replay has history", (rep.payload?.events || []).length >= 2, `events=${rep.payload?.events?.length}`);
+
     // 9. permission/response for unknown id → graceful error, no crash
     send("permission/response", { id: 9999, allow: true });
     const err = await waitOnce("error", 10000);
