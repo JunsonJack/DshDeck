@@ -28,7 +28,13 @@
     </div>
     <div class="sec-head">会话</div>
     <div class="proj-list" id="projList"></div>
-    <div class="side-foot">dsh · acp bridge</div>
+    <footer class="side-foot">
+      <button class="tbtn" id="btnSettings" title="设置">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
+      <span class="grow"></span>
+      <span>dsh · acp</span>
+    </footer>
   </aside>
 
   <section class="main">
@@ -120,6 +126,33 @@
           </button>
         </div>
         <div class="diff-list hint" id="diffList" style="padding:14px">派活后点这里审阅工作区改动（git diff）。</div>
+      </div>
+
+      <div class="settings" id="settingsView">
+        <div class="settings-inner">
+          <div class="settings-head">
+            <button class="tbtn" id="btnSettingsBack" title="返回">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+            </button>
+            <h2>设置</h2>
+          </div>
+
+          <div class="settings-sec">
+            <div class="settings-sec-title">核心与 ACP 状态</div>
+            <div class="status-grid" id="acpStatusGrid"></div>
+          </div>
+
+          <div class="settings-sec">
+            <div class="settings-sec-title">模型</div>
+            <p class="hint" style="margin:0 0 10px">「dsh」来源的模型来自 configOptions，可直接切换；自定义模型仅保存在本机，切换时经 ACP 下发给 dsh，若 dsh 侧未配置该模型会被拒绝。</p>
+            <div id="settingsModels"></div>
+            <div class="add-model">
+              <input id="addProvider" placeholder="Provider（如 deepseek-official）" spellcheck="false" />
+              <input id="addModelId" placeholder="Model ID（如 deepseek-v4-x）" spellcheck="false" />
+              <button class="btn primary" id="btnAddModel">添加</button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="model-pop" id="modelPop">

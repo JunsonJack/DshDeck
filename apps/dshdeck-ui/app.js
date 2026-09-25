@@ -14,6 +14,9 @@ let lastCwd = "";
 let reconnecting = false;
 let pendingResume = false;
 let lastPromptText = "";
+let healthState = null;
+let agentInfoState = null;
+let connectionOk = false;
 const QP_PAGE_SIZE = 8;
 
 const DEFAULT_QP = [
@@ -414,6 +417,89 @@ function showAlert(msg, kind, actionLabel, action) {
 function hideAlert() { $("alertBar").hidden = true; }
 $("alertClose").onclick = hideAlert;
 
+/* settings page (gear, bottom-left) */
+function loadCustomModels() {
+  try { return JSON.parse(localStorage.getItem("dshdeck.customModels")) || []; } catch { return []; }
+}
+function saveCustomModels(list) {
+  localStorage.setItem("dshdeck.customModels", JSON.stringify(list.slice(0, 20)));
+}
+function openSettings() {
+  document.body.classList.add("settings-mode");
+  renderSettings();
+}
+function closeSettings() {
+  document.body.classList.remove("settings-mode");
+}
+$("btnSettings").onclick = openSettings;
+$("btnSettingsBack").onclick = closeSettings;
+
+function renderSettings() {
+  const rows = [
+    ["ACP 连接", connectionOk ? `<span class="dot"></span>已连接` : `<span class="dot err"></span>未连接`],
+    ["Agent", agentInfoState ? `${esc(agentInfoState.name)} · ${esc(agentInfoState.version || "")}` : "—"],
+    ["dsh 可执行", healthState ? (healthState.dsh ? esc(healthState.dsh) : "未在 PATH 中找到") : "经宿主进程管理"],
+    ["上次退出", healthState ? (healthState.uncleanLastExit ? "异常" : "正常") : "—"],
+    ["当前会话", sessionId ? esc(sessionId) : "—"],
+    ["工作区", lastCwd ? esc(lastCwd) : "—"],
+  ];
+  $("acpStatusGrid").innerHTML = rows.map(([k, v]) => `<div class="k">${k}</div><div class="v">${v}</div>`).join("");
+  renderSettingsModels();
+}
+
+function renderSettingsModels() {
+  const model = configOptionsState.find((o) => o.id === "model");
+  const flat = [];
+  for (const g of model?.options || []) {
+    for (const o of g.options || [g]) flat.push(o);
+  }
+  const customs = loadCustomModels();
+  const cur = model?.currentValue;
+  const row = (name, val, source) => `
+    <div class="model-row">
+      <span class="m-name">${esc(name)}</span>
+      <span class="m-val">${esc(val)}</span>
+      <span class="chip ${source}">${source === "dsh" ? "dsh" : "自定义"}</span>
+      ${val === cur ? `<span class="chip cur">当前</span>` : ""}
+      <button class="btn" data-use="${esc(val)}" ${sessionId ? "" : "disabled"}>切换</button>
+      ${source === "custom" ? `<button class="btn danger" data-del="${esc(val)}">删除</button>` : ""}
+    </div>`;
+  const dshRows = flat.map((o) => row(o.name || o.value, o.value, "dsh")).join("");
+  const customRows = customs.map((m) => row(m.name, m.value, "custom")).join("");
+  $("settingsModels").innerHTML =
+    (dshRows || `<div class="hint" style="padding:4px 0 8px">尚未获取到 dsh 模型列表（需要已连接的会话）</div>`) +
+    customRows;
+  document.querySelectorAll("#settingsModels [data-use]").forEach((btn) => {
+    btn.onclick = () => {
+      if (!sessionId) { toast("会话未就绪，无法切换"); return; }
+      sendCmd("session/set_config", { configId: "model", value: btn.dataset.use });
+      toast("已下发切换，dsh 返回后刷新");
+    };
+  });
+  document.querySelectorAll("#settingsModels [data-del]").forEach((btn) => {
+    btn.onclick = () => {
+      saveCustomModels(loadCustomModels().filter((m) => m.value !== btn.dataset.del));
+      renderSettingsModels();
+      toast("已删除自定义模型");
+    };
+  });
+}
+
+$("btnAddModel").onclick = () => {
+  const provider = $("addProvider").value.trim();
+  const modelId = $("addModelId").value.trim();
+  if (!provider || !modelId) { toast("Provider 和 Model ID 都要填"); return; }
+  const customs = loadCustomModels();
+  const value = JSON.stringify([provider, modelId]);
+  if (customs.some((m) => m.value === value)) { toast("该模型已存在"); return; }
+  customs.push({ name: modelId, provider, value });
+  saveCustomModels(customs);
+  $("addProvider").value = "";
+  $("addModelId").value = "";
+  renderSettingsModels();
+  toast("已添加自定义模型");
+};
+
 /* model / effort switching (session/set_config_option via sendCmd) */
 function renderModelPop() {
   const model = configOptionsState.find((o) => o.id === "model");
@@ -421,7 +507,8 @@ function renderModelPop() {
   for (const g of model?.options || []) {
     for (const o of (g.options || [g])) flat.push(o);
   }
-  $("mpModels").innerHTML = flat.map((o) => `
+  const customs = loadCustomModels().map((m) => ({ value: m.value, name: m.name, desc: `自定义 · ${m.provider}` }));
+  $("mpModels").innerHTML = [...flat, ...customs].map((o) => `
     <button class="mp-item ${o.value === model?.currentValue ? "sel" : ""}" data-cid="model" data-val="${esc(o.value)}">
       <span class="mp-check">✓</span>
       <span>${esc(o.name)}${o.description ? `<span class="mp-desc">${esc(o.description)}</span>` : ""}</span>
@@ -554,6 +641,8 @@ function handleMsg(msg) {
       $("crumb").textContent = `工作区 ${payload.cwd}`;
       $("health").classList.remove("warn", "err");
       lastCwd = payload.cwd || lastCwd;
+      agentInfoState = payload.agent?.agentInfo || null;
+      connectionOk = true;
       if (reconnecting && lastSessionId) {
         reconnecting = false;
         pendingResume = true;
@@ -659,6 +748,7 @@ function handleMsg(msg) {
     } else if (type === "exit") {
       $("healthText").textContent = "连接已断开";
       $("health").classList.add("err");
+      connectionOk = false;
       clearQueue();
       showAlert("dsh 连接已断开（进程退出）。重连后会尝试恢复上一个会话。", "danger", "重连", reconnect);
     }
@@ -757,6 +847,7 @@ function boot() {
     TauriAPI.listen("exit", (payload) => handleMsg({ type: "exit", payload }));
     TauriAPI.invoke("health")
       .then((h) => {
+        healthState = h;
         $("healthText").textContent = h?.ok ? "dsh 就绪" : "未找到 dsh";
         if (!h?.ok) {
           $("health").classList.add("warn");
@@ -790,12 +881,14 @@ $("btnShutdown").onclick = () => {
   sendCmd("shutdown");
 };
 $("navNew").onclick = () => {
+  closeSettings();
   document.body.classList.remove("chat-mode");
   $("stream").innerHTML = "";
   resetStream();
   sendCmd("session/new");
 };
 $("navHist").onclick = () => {
+  closeSettings();
   sendCmd("session/list");
 };
 
@@ -806,6 +899,7 @@ $("navHist").onclick = () => {
       if ($("mqMask").classList.contains("open")) closeMq();
       else if ($("qpPop").classList.contains("open")) closeQp();
       else if ($("modelPop").classList.contains("open")) closeModelPop();
+      else if (document.body.classList.contains("settings-mode")) closeSettings();
       else if (prompting) sendCmd("session/cancel");
     }
   });
