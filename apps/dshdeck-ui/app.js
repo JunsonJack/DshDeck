@@ -204,6 +204,9 @@ function setRunning(on) {
   });
   [$("spin"), $("spinW")].forEach((s) => s.classList.toggle("on", on));
 }
+function resetStream() {
+  streamEl = null; usageEl = null; streamRaw = "";
+}
 function ensureStream() {
   if (!streamEl) {
     addBlock(`<div class="flow"><div class="msg-stream cursor-blink" id="liveStream"></div><div class="usage" id="liveUsage"></div></div>`);
@@ -211,9 +214,28 @@ function ensureStream() {
     usageEl = $("liveUsage");
   }
 }
+
+/* markdown pipeline — vendor scripts optional, graceful fallback to escaped plain text */
+const mdParse = (() => {
+  try {
+    if (window.marked?.parse && window.DOMPurify?.sanitize) {
+      const parse = (t) => window.DOMPurify.sanitize(window.marked.parse(t, { breaks: true, gfm: true }));
+      parse("test");
+      return parse;
+    }
+  } catch {}
+  return null;
+})();
+function renderMarkdown(text) {
+  return mdParse ? mdParse(text) : esc(text);
+}
+
+let streamRaw = "";
 function appendChunk(text) {
   ensureStream();
-  streamEl.textContent += text;
+  streamRaw += text;
+  streamEl.classList.toggle("md", !!mdParse);
+  streamEl.innerHTML = renderMarkdown(streamRaw);
   $("stream").scrollTop = $("stream").scrollHeight;
 }
 function endStreamCursor() {
@@ -221,13 +243,17 @@ function endStreamCursor() {
 }
 
 /** TAO blocks */
+const thoughtBuf = new Map();
 function addThought(messageId, text) {
-  addBlock(`<div class="flow"><details class="panel"><summary>${I.chev}<span class="panel-title">思考</span><div class="grow"></div><span class="status running"><span class="run-dot"></span>thought</span></summary><div class="panel-body" data-thought="${esc(messageId)}">${esc(text)}</div></details></div>`);
+  thoughtBuf.set(messageId, text);
+  addBlock(`<div class="flow"><details class="panel"><summary>${I.chev}<span class="panel-title">思考</span><div class="grow"></div><span class="status running"><span class="run-dot"></span>thought</span></summary><div class="panel-body${mdParse ? " md" : ""}" data-thought="${esc(messageId)}">${renderMarkdown(text)}</div></details></div>`);
 }
 function appendThought(messageId, text) {
   const el = document.querySelector(`[data-thought="${CSS.escape(messageId)}"]`);
-  if (el) el.textContent += text;
-  else addThought(messageId, text);
+  if (!el) return addThought(messageId, text);
+  const buf = (thoughtBuf.get(messageId) || "") + text;
+  thoughtBuf.set(messageId, buf);
+  el.innerHTML = renderMarkdown(buf);
   $("stream").scrollTop = $("stream").scrollHeight;
 }
 function addToolCard(u) {
@@ -425,6 +451,7 @@ document.addEventListener("click", (e) => {
 /* reconnect flow (M1.5 exception recovery) */
 function reconnect() {
   hideAlert();
+  clearQueue();
   reconnecting = true;
   sendCmd("boot", { cwd: lastCwd });
 }
@@ -570,7 +597,7 @@ function handleMsg(msg) {
       if (payload.ok) toast("改动 " + (payload.files?.length || 0) + " 个文件");
     } else if (type === "prompt/start") {
       setRunning(true);
-      streamEl = null; usageEl = null;
+      resetStream();
     } else if (type === "prompt/stop") {
       setRunning(false);
       endStreamCursor();
@@ -580,8 +607,9 @@ function handleMsg(msg) {
       } else {
         toast("完成 · " + (payload.stopReason || ""));
       }
-      // refresh diff after each turn
+      // refresh diff after each turn, then drain the queue
       sendCmd("git/diff");
+      setTimeout(dequeueNext, 250);
     } else if (type === "prompt/error") {
       setRunning(false);
       endStreamCursor();
@@ -625,14 +653,63 @@ function handleMsg(msg) {
     } else if (type === "exit") {
       $("healthText").textContent = "连接已断开";
       $("health").classList.add("err");
+      clearQueue();
       showAlert("dsh 连接已断开（进程退出）。重连后会尝试恢复上一个会话。", "danger", "重连", reconnect);
     }
+}
+
+/* prompt queue — busy 时排队，任务结束后按序自动发送 */
+const promptQueue = [];
+function queuePrompt(text) {
+  if (promptQueue.length >= 5) { toast("队列已满（5），请等当前任务完成"); return; }
+  promptQueue.push(text);
+  renderQueue();
+  toast("已排队 · 当前任务完成后自动发送");
+}
+function renderQueue() {
+  const bar = $("queueBar");
+  if (!promptQueue.length) { bar.hidden = true; return; }
+  bar.hidden = false;
+  $("queueText").textContent = `已排队 ${promptQueue.length}：${promptQueue[0].slice(0, 42)}`;
+}
+$("queueBar").onclick = () => {
+  const t = promptQueue.pop();
+  renderQueue();
+  if (t) toast("已移除最后一条排队");
+};
+function dequeueNext() {
+  if (!promptQueue.length || prompting) { renderQueue(); return; }
+  const next = promptQueue.shift();
+  renderQueue();
+  sendNow(next);
+}
+function clearQueue() { promptQueue.length = 0; renderQueue(); }
+
+function sendNow(text) {
+  addBlock(`<div class="flow"><div class="msg-user"><div class="meta">你</div>${esc(text)}</div></div>`);
+  resetStream();
+  lastPromptText = text;
+  sendCmd("session/prompt", { text });
+}
+
+function send() {
+  const ta = currentInput();
+  const text = ta.value.trim();
+  if (prompting) {
+    // busy: with text → enqueue; empty input (or the ■ button) → interrupt
+    if (text) { queuePrompt(text); ta.value = ""; }
+    else sendCmd("session/cancel");
+    return;
+  }
+  if (!text) { toast("输入任务，或从快捷消息中选择"); return; }
+  ta.value = "";
+  sendNow(text);
 }
 
 function retryPrompt() {
   if (!lastPromptText || prompting) return;
   addBlock(`<div class="flow"><div class="msg-user"><div class="meta">你 · 重试</div>${esc(lastPromptText)}</div></div>`);
-  streamEl = null; usageEl = null;
+  resetStream();
   sendCmd("session/prompt", { text: lastPromptText });
 }
 
@@ -666,21 +743,6 @@ function boot() {
   };
 }
 
-function send() {
-  if (prompting) {
-    sendCmd("session/cancel");
-    return;
-  }
-  const ta = currentInput();
-  const text = ta.value.trim();
-  if (!text) { toast("输入任务，或从快捷消息中选择"); return; }
-  addBlock(`<div class="flow"><div class="msg-user"><div class="meta">你</div>${esc(text)}</div></div>`);
-  ta.value = "";
-  streamEl = null; usageEl = null;
-  lastPromptText = text;
-  sendCmd("session/prompt", { text });
-}
-
 $("btnSendW").onclick = send;
 $("btnSend").onclick = send;
 $("btnDiff").onclick = () => {
@@ -694,7 +756,7 @@ $("btnShutdown").onclick = () => {
 $("navNew").onclick = () => {
   document.body.classList.remove("chat-mode");
   $("stream").innerHTML = "";
-  streamEl = null;
+  resetStream();
   sendCmd("session/new");
 };
 $("navHist").onclick = () => {
@@ -708,7 +770,7 @@ $("navHist").onclick = () => {
       if ($("mqMask").classList.contains("open")) closeMq();
       else if ($("qpPop").classList.contains("open")) closeQp();
       else if ($("modelPop").classList.contains("open")) closeModelPop();
-      else if (prompting) send();
+      else if (prompting) sendCmd("session/cancel");
     }
   });
 });

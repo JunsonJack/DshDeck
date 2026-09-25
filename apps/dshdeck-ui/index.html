@@ -91,6 +91,9 @@
       <div class="stream" id="stream"></div>
 
       <div class="dock">
+        <button class="queue-bar" id="queueBar" hidden title="点击移除最后一条排队消息">
+          <span id="queueText"></span><span class="hint">点击移除末条</span>
+        </button>
         <div class="composer">
           <textarea id="input" rows="2" placeholder="描述任务，派给 dsh…（Enter 发送 · Shift+Enter 换行）"></textarea>
           <div class="bar">
@@ -173,6 +176,8 @@
 </div>
 
 <div class="toast" id="toast"></div>
+<script src="./vendor/marked.min.js"></script>
+<script src="./vendor/purify.min.js"></script>
 <script type="module" src="./app.js"></script>
 </body>
 </html>

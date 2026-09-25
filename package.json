@@ -12,6 +12,8 @@
     "start": "node apps/dshdeck-host/server.mjs"
   },
   "dependencies": {
+    "dompurify": "^3.4.16",
+    "marked": "^18.0.14",
     "ws": "^8.18.0"
   },
   "devDependencies": {
