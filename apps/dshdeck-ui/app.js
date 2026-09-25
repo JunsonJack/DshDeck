@@ -425,14 +425,26 @@ function saveCustomModels(list) {
   localStorage.setItem("dshdeck.customModels", JSON.stringify(list.slice(0, 20)));
 }
 function openSettings() {
-  document.body.classList.add("settings-mode");
+  $("settingsView").classList.add("open");
   renderSettings();
 }
 function closeSettings() {
-  document.body.classList.remove("settings-mode");
+  $("settingsView").classList.remove("open");
 }
 $("btnSettings").onclick = openSettings;
 $("btnSettingsBack").onclick = closeSettings;
+$("settingsView").onclick = (e) => {
+  if (e.target === $("settingsView")) closeSettings();
+};
+document.querySelectorAll(".settings-menu .sm-item").forEach((item) => {
+  item.onclick = () => {
+    document.querySelectorAll(".settings-menu .sm-item").forEach((x) => x.classList.remove("active"));
+    item.classList.add("active");
+    document.querySelectorAll(".settings-pane").forEach((p) => {
+      p.classList.toggle("active", p.dataset.pane === item.dataset.sec);
+    });
+  };
+});
 
 function renderSettings() {
   const rows = [
@@ -897,9 +909,9 @@ $("navHist").onclick = () => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
     if (e.key === "Escape") {
       if ($("mqMask").classList.contains("open")) closeMq();
+      else if ($("settingsView").classList.contains("open")) closeSettings();
       else if ($("qpPop").classList.contains("open")) closeQp();
       else if ($("modelPop").classList.contains("open")) closeModelPop();
-      else if (document.body.classList.contains("settings-mode")) closeSettings();
       else if (prompting) sendCmd("session/cancel");
     }
   });

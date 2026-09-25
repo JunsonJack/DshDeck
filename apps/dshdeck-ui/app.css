@@ -120,19 +120,31 @@ code, .mono { font-family: var(--mono); }
 
 .side-foot { display: flex; align-items: center; gap: 6px; padding: 8px 10px 8px 8px; border-top: 1px solid var(--line); color: var(--ink-3); font-size: 11px; font-family: var(--mono); }
 
-/* ---------- settings ---------- */
-.settings { position: absolute; inset: 0; z-index: 3; overflow: auto; padding: 24px; display: none; }
-body.settings-mode .settings { display: block; }
-body.settings-mode .welcome,
-body.settings-mode .stream,
-body.settings-mode .dock,
-body.settings-mode .qp-pop,
-body.settings-mode .model-pop,
-body.settings-mode .alert { display: none !important; }
-.settings-inner { width: min(720px, 100%); margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
-.settings-head { display: flex; align-items: center; gap: 8px; }
-.settings-head h2 { margin: 0; font-size: 16px; font-weight: 600; }
-.settings-sec { background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+/* ---------- settings (modal: menu + panes) ---------- */
+.settings-modal { width: min(760px, 100%); height: min(560px, 84vh); display: flex; flex-direction: column; position: relative; }
+.settings-modal > .close {
+  position: absolute; top: 10px; right: 10px; width: 28px; height: 28px;
+  border-radius: 6px; color: var(--ink-2); display: grid; place-items: center;
+}
+.settings-modal > .close:hover { background: var(--bg-3); color: var(--ink); }
+.settings-modal > .close svg { width: 14px; height: 14px; }
+.settings-modal-body { display: flex; flex: 1; min-height: 0; }
+.settings-menu {
+  width: 176px; flex: none; border-right: 1px solid var(--line);
+  padding: 14px 8px; display: flex; flex-direction: column; gap: 2px;
+}
+.settings-menu-title { font-size: 13px; font-weight: 600; padding: 0 10px 10px; }
+.sm-item {
+  display: flex; align-items: center; gap: 9px; width: 100%; height: 32px;
+  padding: 0 10px; border-radius: 6px; color: var(--ink-2); font-size: 13px; text-align: left;
+}
+.sm-item:hover { background: var(--bg-3); color: var(--ink); }
+.sm-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.sm-item svg { width: 15px; height: 15px; flex: none; }
+.settings-content { flex: 1; min-width: 0; overflow: auto; padding: 14px 18px; }
+.settings-pane { display: none; }
+.settings-pane.active { display: block; }
+.settings-sec { background: transparent; border: none; border-radius: 0; padding: 0; }
 .settings-sec-title {
   font-size: 10.5px; font-weight: 600; letter-spacing: 0.8px; text-transform: uppercase;
   color: var(--ink-3); margin-bottom: 12px;

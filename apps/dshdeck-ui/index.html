@@ -128,30 +128,44 @@
         <div class="diff-list hint" id="diffList" style="padding:14px">派活后点这里审阅工作区改动（git diff）。</div>
       </div>
 
-      <div class="settings" id="settingsView">
-        <div class="settings-inner">
-          <div class="settings-head">
-            <button class="tbtn" id="btnSettingsBack" title="返回">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-            </button>
-            <h2>设置</h2>
-          </div>
-
-          <div class="settings-sec">
-            <div class="settings-sec-title">核心与 ACP 状态</div>
-            <div class="status-grid" id="acpStatusGrid"></div>
-          </div>
-
-          <div class="settings-sec">
-            <div class="settings-sec-title">模型</div>
-            <p class="hint" style="margin:0 0 10px">「dsh」来源的模型来自 configOptions，可直接切换；自定义模型仅保存在本机，切换时经 ACP 下发给 dsh，若 dsh 侧未配置该模型会被拒绝。</p>
-            <div id="settingsModels"></div>
-            <div class="add-model">
-              <input id="addProvider" placeholder="Provider（如 deepseek-official）" spellcheck="false" />
-              <input id="addModelId" placeholder="Model ID（如 deepseek-v4-x）" spellcheck="false" />
-              <button class="btn primary" id="btnAddModel">添加</button>
+      <div class="modal-mask" id="settingsView">
+        <div class="modal settings-modal">
+          <div class="settings-modal-body">
+            <aside class="settings-menu">
+              <div class="settings-menu-title">设置</div>
+              <button class="sm-item active" data-sec="status">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                <span>状态</span>
+              </button>
+              <button class="sm-item" data-sec="models">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="7" width="14" height="10" rx="2"/><path d="M12 3v4M12 17v4M9 12h.01M15 12h.01"/></svg>
+                <span>模型配置</span>
+              </button>
+            </aside>
+            <div class="settings-content">
+              <div class="settings-pane active" data-pane="status">
+                <div class="settings-sec">
+                  <div class="settings-sec-title">核心与 ACP 状态</div>
+                  <div class="status-grid" id="acpStatusGrid"></div>
+                </div>
+              </div>
+              <div class="settings-pane" data-pane="models">
+                <div class="settings-sec">
+                  <div class="settings-sec-title">模型</div>
+                  <p class="hint" style="margin:0 0 10px">「dsh」来源的模型来自 configOptions，可直接切换；自定义模型仅保存在本机，切换时经 ACP 下发给 dsh，若 dsh 侧未配置该模型会被拒绝。</p>
+                  <div id="settingsModels"></div>
+                  <div class="add-model">
+                    <input id="addProvider" placeholder="Provider（如 deepseek-official）" spellcheck="false" />
+                    <input id="addModelId" placeholder="Model ID（如 deepseek-v4-x）" spellcheck="false" />
+                    <button class="btn primary" id="btnAddModel">添加</button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
+          <button class="close" id="btnSettingsBack" title="关闭">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
         </div>
       </div>
 
