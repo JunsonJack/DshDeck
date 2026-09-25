@@ -200,22 +200,40 @@ impl AcpState {
             }
         }
         let profile = profile.unwrap_or_else(|| "acp".into());
-        let lock = match std::net::TcpListener::bind(("127.0.0.1", profile_lock_port(&profile))) {
-            Ok(l) => l,
-            Err(_) => {
-                return Err(format!(
-                    "profile「{profile}」已有活动连接（另一个 DshDeck 窗口在运行？），同 profile 不双开"
-                ))
-            }
-        };
-        self._lock = Some(lock);
+        // resolve the shim first — on Windows dsh is typically a .cmd (nvmd),
+        // and CreateProcess can't execute .cmd directly
+        let dsh_path = which::which("dsh")
+            .map_err(|e| format!("未在 PATH 中找到 dsh（本机经 nvmd shim 安装）：{e}"))?;
+        let needs_shell = matches!(
+            dsh_path.extension().and_then(|e| e.to_str()),
+            Some("cmd") | Some("bat")
+        );
+        // hold one lock per process: rebinding on reconnect would deadlock
+        // against our own still-listening socket
+        if self._lock.is_none() {
+            let lock = match std::net::TcpListener::bind(("127.0.0.1", profile_lock_port(&profile))) {
+                Ok(l) => l,
+                Err(_) => {
+                    return Err(format!(
+                        "profile「{profile}」已有活动连接（另一个 DshDeck 窗口在运行？），同 profile 不双开"
+                    ))
+                }
+            };
+            self._lock = Some(lock);
+        }
         let emit: EmitFn = Arc::new(on_event);
         self.emit = Some(emit.clone());
 
-        let mut cmd = Command::new("dsh");
-        cmd.arg("--profile")
-            .arg(&profile)
-            .current_dir(&self.cwd)
+        let mut cmd = if needs_shell {
+            let mut c = Command::new("cmd");
+            c.arg("/C").arg(&dsh_path).arg("--profile").arg(&profile);
+            c
+        } else {
+            let mut c = Command::new(&dsh_path);
+            c.arg("--profile").arg(&profile);
+            c
+        };
+        cmd.current_dir(&self.cwd)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -442,4 +460,44 @@ pub fn git_diff(cwd: &str) -> Result<Value, String> {
         }
     }
     Ok(json!({ "ok": true, "git": true, "files": out_files }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Real-dsh integration test: boot, kill the child, boot again in the SAME
+    /// process — reconnect must not deadlock against our own profile lock.
+    /// Run explicitly: cargo test reconnect_after_child_death -- --ignored
+    #[test]
+    #[ignore = "spawns the real dsh binary"]
+    fn reconnect_after_child_death() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let mut st = AcpState::new();
+            let agent = st
+                .boot(None, Some("acp".into()), |_| {})
+                .await
+                .expect("first boot");
+            assert!(agent.get("agentInfo").is_some(), "initialize result");
+
+            tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+            st.child
+                .as_mut()
+                .expect("dsh child alive")
+                .kill()
+                .await
+                .expect("kill dsh child");
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+            let agent2 = st
+                .boot(None, Some("acp".into()), |_| {})
+                .await
+                .expect("reconnect boot in same process");
+            assert!(agent2.get("agentInfo").is_some(), "second initialize");
+            assert_eq!(st.exits.len(), 1, "unclean exit recorded once");
+
+            st.child.as_mut().unwrap().kill().await.ok();
+        });
+    }
 }
